@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log
+.next
+.git
+.gitignore
+Dockerfile
+docker-compose.yml
+docker-compose.dev.yml
+.vscode
+.idea
+.env
+.env.local

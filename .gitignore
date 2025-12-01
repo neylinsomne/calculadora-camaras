@@ -1,0 +1,24 @@
+# dependencias
+node_modules/
+.npm/
+.pnp/
+.pnp.cjs
+
+# builds de Next
+.next/
+out/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# sistema
+.DS_Store
+Thumbs.db
+
+# entorno
+.env
+.env.local
+.env.*.local
