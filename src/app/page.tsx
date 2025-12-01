@@ -9,6 +9,15 @@ type TabId = "simulador" | "info" | "carrito";
 
 const LOCAL_RECORDING_PRICE = 1.5; // Grabación local U$ 1.50 / cámara
 
+// Descripción corta por tab
+const TAB_DESCRIPTIONS: Record<TabId, string> = {
+  simulador:
+    "Vista general para estimar rápidamente el costo por cámara y por grupo.",
+  carrito:
+    "Factura editable: cada fila es una cámara/grupo, con servicios por columna y margen global.",
+  info: "Resumen conceptual de arquitectura y costos ocultos de operar modelos propios vs servicio gestionado.",
+};
+
 type RecordingChoice = "local" | number;
 
 function computeDaily(monthly: number) {
@@ -38,28 +47,28 @@ function getRecordingInfo(
   };
 }
 
+// Fila de la factura
 type CameraCartItem = {
   id: string;
   nombre: string;
   cantidad: number;
-  selectedServiceIds: number[];
-  selectedRecording: RecordingChoice;
-  marginPercent: number;
+  selectedServiceIds: number[]; // servicios de analítica
+  selectedRecording: RecordingChoice; // local o nube
 };
 
 export default function HomePage() {
   const [prices, setPrices] = useState<PriceRow[]>([]);
   const [activeTab, setActiveTab] = useState<TabId>("simulador");
 
-  // simulación general (tab 1)
+  // Simulador general
   const [numCamaras, setNumCamaras] = useState<number>(10);
   const [selectedServiceIds, setSelectedServiceIds] = useState<number[]>([]);
   const [selectedRecordingId, setSelectedRecordingId] =
     useState<RecordingChoice>("local");
 
-  // carrito / factura
+  // Factura / carrito
   const [cartItems, setCartItems] = useState<CameraCartItem[]>([]);
-  const [activeCartIndex, setActiveCartIndex] = useState<number | null>(null);
+  const [globalMarginPercent, setGlobalMarginPercent] = useState<number>(30);
 
   // cargar precios del backend
   useEffect(() => {
@@ -77,7 +86,8 @@ export default function HomePage() {
     (p) => p.categoria === "GRABACIÓN DE VIDEO EN LA NUBE"
   );
 
-  // --- TAB 1: simulación general ---
+  // --- TAB 1: simulador general ---
+
   const toggleServiceSelected = (id: number) => {
     setSelectedServiceIds((prev) =>
       prev.includes(id) ? prev.filter((sid) => sid !== id) : [...prev, id]
@@ -104,7 +114,7 @@ export default function HomePage() {
   const dailyTotal = dailyPerCamera * numCamaras;
   const weeklyTotal = weeklyPerCamera * numCamaras;
 
-  // --- TAB 3: carrito / factura por cámara ---
+  // --- TAB 2: factura / carrito ---
 
   const addCartItem = () => {
     setCartItems((prev) => [
@@ -115,20 +125,12 @@ export default function HomePage() {
         cantidad: 1,
         selectedServiceIds: [],
         selectedRecording: "local",
-        marginPercent: 30,
       },
     ]);
-    setActiveCartIndex((prevIndex) => (prevIndex === null ? 0 : prevIndex));
   };
 
   const removeCartItem = (index: number) => {
     setCartItems((prev) => prev.filter((_, i) => i !== index));
-    setActiveCartIndex((prev) => {
-      if (prev === null) return null;
-      if (prev === index) return null;
-      if (prev > index) return prev - 1;
-      return prev;
-    });
   };
 
   const updateCartItemField = <K extends keyof CameraCartItem>(
@@ -156,7 +158,7 @@ export default function HomePage() {
     );
   };
 
-  // margen SOBRE EL TOTAL mensual de la fila
+  // costos base por fila (sin margen)
   const computeCartItemCosts = (item: CameraCartItem) => {
     const analyticSelected = analyticServices.filter((s) =>
       item.selectedServiceIds.includes(s.id)
@@ -174,11 +176,6 @@ export default function HomePage() {
     const dailyTotalBase = computeDaily(monthlyPerCameraBase) * item.cantidad;
     const weeklyTotalBase = computeWeekly(monthlyPerCameraBase) * item.cantidad;
 
-    const factor = 1 + (item.marginPercent || 0) / 100; // margen sobre el total
-    const monthlyTotalSale = monthlyTotalBase * factor;
-    const dailyTotalSale = dailyTotalBase * factor;
-    const weeklyTotalSale = weeklyTotalBase * factor;
-
     return {
       analyticSelected,
       recordingInfo,
@@ -186,36 +183,35 @@ export default function HomePage() {
       monthlyTotalBase,
       weeklyTotalBase,
       dailyTotalBase,
-      monthlyTotalSale,
-      weeklyTotalSale,
-      dailyTotalSale,
     };
   };
 
+  // totales base
   const cartTotals = cartItems.reduce(
     (acc, item) => {
       const c = computeCartItemCosts(item);
       acc.monthlyCost += c.monthlyTotalBase;
       acc.weeklyCost += c.weeklyTotalBase;
       acc.dailyCost += c.dailyTotalBase;
-      acc.monthlySale += c.monthlyTotalSale;
-      acc.weeklySale += c.weeklyTotalSale;
-      acc.dailySale += c.dailyTotalSale;
       return acc;
     },
     {
       monthlyCost: 0,
       weeklyCost: 0,
       dailyCost: 0,
-      monthlySale: 0,
-      weeklySale: 0,
-      dailySale: 0,
     }
   );
 
+  // margen GLOBAL sobre el total
+  const factor = 1 + (globalMarginPercent || 0) / 100;
+  const saleTotals = {
+    dailySale: cartTotals.dailyCost * factor,
+    weeklySale: cartTotals.weeklyCost * factor,
+    monthlySale: cartTotals.monthlyCost * factor,
+  };
+
   const handlePrintPdf = () => {
-    // El usuario puede seleccionar "Guardar como PDF"
-    window.print();
+    window.print(); // luego puedes refinar esto con jsPDF si quieres
   };
 
   return (
@@ -281,6 +277,11 @@ export default function HomePage() {
             onClick={() => setActiveTab("info")}
           />
         </nav>
+
+        {/* Descripción corta del tab activo */}
+        <p className="mt-2 text-xs md:text-sm text-neutral-500">
+          {TAB_DESCRIPTIONS[activeTab]}
+        </p>
 
         {/* TAB 1: Simulador general */}
         {activeTab === "simulador" && (
@@ -394,8 +395,8 @@ export default function HomePage() {
               </h2>
               <p className="text-sm text-neutral-600">
                 Elige entre <strong>grabación local</strong> (ej. NVR/DVR, costo
-                de operación estimado) o un plan de grabación en la nube con
-                días de retención.
+                estimado) o un plan de grabación en la nube con días de
+                retención.
               </p>
 
               <div className="flex flex-col md:flex-row gap-4 items-center">
@@ -510,7 +511,7 @@ export default function HomePage() {
           </section>
         )}
 
-        {/* TAB 2: Factura / carrito en tabla elegante */}
+        {/* TAB 2: Factura / carrito en tabla con columnas por servicio */}
         {activeTab === "carrito" && (
           <section className="space-y-6">
             <div className="bg-white border rounded-xl p-4 md:p-6 space-y-3">
@@ -518,9 +519,9 @@ export default function HomePage() {
                 Factura / propuesta por cámara
               </h2>
               <p className="text-sm text-neutral-600">
-                Cada fila representa una cámara (o grupo de cámaras) con sus
-                servicios, tipo de grabación y un{" "}
-                <strong>margen de ganancia sobre el total mensual</strong>.
+                Cada fila representa una cámara (o grupo de cámaras). Las
+                columnas centrales son los servicios; si el checkbox está
+                seleccionado, aparece el precio mensual por ese grupo.
               </p>
               <button
                 type="button"
@@ -538,91 +539,169 @@ export default function HomePage() {
               </p>
             ) : (
               <>
-                {/* Tabla elegante tipo factura */}
+                {/* Tabla editable tipo factura */}
                 <div className="bg-white border rounded-xl p-4 md:p-6 space-y-4">
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-lg font-semibold">
                       Detalle de cámaras
                     </h3>
                     <p className="text-xs text-neutral-500">
-                      Haz clic en una fila para editarla.
+                      Los campos son editables directamente en la tabla.
                     </p>
                   </div>
+
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs md:text-sm border-collapse">
                       <thead>
                         <tr className="border-b bg-neutral-50">
                           <th className="p-2 text-left">ID</th>
                           <th className="p-2 text-left">Descripción</th>
-                          <th className="p-2 text-right">Cantidad</th>
-                          <th className="p-2 text-left">Servicios</th>
+                          <th className="p-2 text-right">Cant.</th>
                           <th className="p-2 text-left">Grabación</th>
+                          {/* Columnas por servicio */}
+                          {analyticServices.map((s) => (
+                            <th key={s.id} className="p-2 text-center">
+                              {s.categoria}
+                            </th>
+                          ))}
                           <th className="p-2 text-right">
-                            Margen sobre total (%)
-                          </th>
-                          <th className="p-2 text-right">Costo mensual (U$)</th>
-                          <th className="p-2 text-right">
-                            Precio mensual con margen (U$)
+                            Subtotal mensual (U$)
                           </th>
                           <th className="p-2 text-center">Acciones</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {cartItems.map((item, index) => {
+                        {cartItems.map((item, rowIndex) => {
                           const c = computeCartItemCosts(item);
-                          const isActive = index === activeCartIndex;
-                          const serviciosLabel =
-                            c.analyticSelected.length === 0
-                              ? "Sin analítica"
-                              : c.analyticSelected
-                                  .map((s) => s.categoria)
-                                  .join(", ");
-                          const grabacionLabel =
-                            c.recordingInfo?.modalidad ?? "Sin definir";
-
                           return (
                             <tr
                               key={item.id}
-                              className={`border-b last:border-0 cursor-pointer hover:bg-neutral-50 ${
-                                isActive ? "bg-neutral-50" : ""
-                              }`}
-                              onClick={() => setActiveCartIndex(index)}
+                              className="border-b last:border-0 hover:bg-neutral-50"
                             >
-                              <td className="p-2 align-middle font-semibold">
-                                {item.id}
-                              </td>
-                              <td className="p-2 align-middle max-w-[160px]">
-                                <span className="block truncate">
-                                  {item.nombre || "—"}
-                                </span>
-                              </td>
-                              <td className="p-2 align-middle text-right">
-                                {item.cantidad}
-                              </td>
+                              {/* ID editable */}
                               <td className="p-2 align-middle">
-                                <span className="block truncate">
-                                  {serviciosLabel}
-                                </span>
+                                <input
+                                  type="text"
+                                  value={item.id}
+                                  onChange={(e) =>
+                                    updateCartItemField(
+                                      rowIndex,
+                                      "id",
+                                      e.target.value
+                                    )
+                                  }
+                                  className="w-20 border rounded px-1 py-0.5 text-xs"
+                                />
                               </td>
+
+                              {/* Descripción editable */}
                               <td className="p-2 align-middle">
-                                {grabacionLabel}
+                                <input
+                                  type="text"
+                                  placeholder="Portería, Bodega, etc."
+                                  value={item.nombre}
+                                  onChange={(e) =>
+                                    updateCartItemField(
+                                      rowIndex,
+                                      "nombre",
+                                      e.target.value
+                                    )
+                                  }
+                                  className="w-40 md:w-56 border rounded px-1 py-0.5 text-xs"
+                                />
                               </td>
+
+                              {/* Cantidad */}
                               <td className="p-2 align-middle text-right">
-                                {item.marginPercent.toFixed(1)}
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={item.cantidad}
+                                  onChange={(e) =>
+                                    updateCartItemField(
+                                      rowIndex,
+                                      "cantidad",
+                                      Math.max(1, Number(e.target.value) || 1)
+                                    )
+                                  }
+                                  className="w-16 border rounded px-1 py-0.5 text-xs text-right"
+                                />
                               </td>
-                              <td className="p-2 align-middle text-right">
+
+                              {/* Grabación local / nube */}
+                              <td className="p-2 align-middle">
+                                <select
+                                  value={item.selectedRecording}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    if (value === "local") {
+                                      updateCartItemField(
+                                        rowIndex,
+                                        "selectedRecording",
+                                        "local"
+                                      );
+                                    } else {
+                                      updateCartItemField(
+                                        rowIndex,
+                                        "selectedRecording",
+                                        Number(value)
+                                      );
+                                    }
+                                  }}
+                                  className="border rounded px-1 py-0.5 text-xs"
+                                >
+                                  <option value="local">
+                                    Local – U${" "}
+                                    {LOCAL_RECORDING_PRICE.toFixed(2)}/cam
+                                  </option>
+                                  {recordingOptions.map((r) => (
+                                    <option key={r.id} value={r.id}>
+                                      {r.modalidad} – U${" "}
+                                      {r.precio_usd.toFixed(2)}/cam
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+
+                              {/* Columnas de servicios (checkbox + precio si está marcado) */}
+                              {analyticServices.map((s) => {
+                                const included =
+                                  item.selectedServiceIds.includes(s.id);
+                                const monthlyRowPrice =
+                                  s.precio_usd * item.cantidad;
+                                return (
+                                  <td
+                                    key={s.id}
+                                    className="p-2 align-middle text-center"
+                                  >
+                                    <label className="inline-flex flex-col items-center gap-1">
+                                      <input
+                                        type="checkbox"
+                                        checked={included}
+                                        onChange={() =>
+                                          toggleCartItemService(rowIndex, s.id)
+                                        }
+                                      />
+                                      {included && (
+                                        <span className="text-[0.65rem] md:text-xs text-neutral-700">
+                                          U$ {monthlyRowPrice.toFixed(2)}
+                                        </span>
+                                      )}
+                                    </label>
+                                  </td>
+                                );
+                              })}
+
+                              {/* Subtotal mensual base */}
+                              <td className="p-2 align-middle text-right font-semibold">
                                 {c.monthlyTotalBase.toFixed(2)}
                               </td>
-                              <td className="p-2 align-middle text-right">
-                                {c.monthlyTotalSale.toFixed(2)}
-                              </td>
+
+                              {/* Borrar fila */}
                               <td className="p-2 align-middle text-center">
                                 <button
                                   type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    removeCartItem(index);
-                                  }}
+                                  onClick={() => removeCartItem(rowIndex)}
                                   className="text-xs text-red-500 hover:underline"
                                 >
                                   Borrar
@@ -636,255 +715,32 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                {/* Panel de edición de la fila seleccionada */}
-                {activeCartIndex !== null && cartItems[activeCartIndex] && (
-                  <div className="bg-white border rounded-xl p-4 md:p-6 space-y-4">
-                    <h3 className="text-lg font-semibold">
-                      Editar fila seleccionada
-                    </h3>
-                    <p className="text-xs text-neutral-600">
-                      Ajusta el ID, la descripción, la cantidad, los servicios
-                      de analítica, el tipo de grabación y el margen aplicado
-                      sobre el total mensual de esta fila.
-                    </p>
-
-                    {(() => {
-                      const item = cartItems[activeCartIndex];
-                      const c = computeCartItemCosts(item);
-                      return (
-                        <>
-                          {/* Datos básicos de la fila */}
-                          <div className="grid md:grid-cols-4 gap-4 text-sm">
-                            <label className="flex flex-col gap-1">
-                              ID interno
-                              <input
-                                type="text"
-                                value={item.id}
-                                onChange={(e) =>
-                                  updateCartItemField(
-                                    activeCartIndex,
-                                    "id",
-                                    e.target.value
-                                  )
-                                }
-                                className="border rounded px-2 py-1"
-                              />
-                            </label>
-                            <label className="flex flex-col gap-1 md:col-span-2">
-                              Descripción
-                              <input
-                                type="text"
-                                placeholder="Portería principal, Bodega 1, etc."
-                                value={item.nombre}
-                                onChange={(e) =>
-                                  updateCartItemField(
-                                    activeCartIndex,
-                                    "nombre",
-                                    e.target.value
-                                  )
-                                }
-                                className="border rounded px-2 py-1"
-                              />
-                            </label>
-                            <label className="flex flex-col gap-1">
-                              Cantidad de cámaras
-                              <input
-                                type="number"
-                                min={1}
-                                value={item.cantidad}
-                                onChange={(e) =>
-                                  updateCartItemField(
-                                    activeCartIndex,
-                                    "cantidad",
-                                    Math.max(1, Number(e.target.value) || 1)
-                                  )
-                                }
-                                className="border rounded px-2 py-1"
-                              />
-                            </label>
-                            <label className="flex flex-col gap-1">
-                              Margen sobre total mensual (%)
-                              <input
-                                type="number"
-                                min={0}
-                                value={item.marginPercent}
-                                onChange={(e) =>
-                                  updateCartItemField(
-                                    activeCartIndex,
-                                    "marginPercent",
-                                    Number(e.target.value) || 0
-                                  )
-                                }
-                                className="border rounded px-2 py-1"
-                              />
-                            </label>
-                            <label className="flex flex-col gap-1 md:col-span-3">
-                              Tipo de grabación
-                              <select
-                                value={item.selectedRecording}
-                                onChange={(e) => {
-                                  const value = e.target.value;
-                                  if (value === "local") {
-                                    updateCartItemField(
-                                      activeCartIndex,
-                                      "selectedRecording",
-                                      "local"
-                                    );
-                                  } else {
-                                    updateCartItemField(
-                                      activeCartIndex,
-                                      "selectedRecording",
-                                      Number(value)
-                                    );
-                                  }
-                                }}
-                                className="border rounded px-2 py-1"
-                              >
-                                <option value="local">
-                                  Grabación local – U${" "}
-                                  {LOCAL_RECORDING_PRICE.toFixed(2)} / cámara
-                                </option>
-                                {recordingOptions.map((r) => (
-                                  <option key={r.id} value={r.id}>
-                                    {r.modalidad} – U$ {r.precio_usd.toFixed(2)}{" "}
-                                    / cámara
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          </div>
-
-                          {/* Servicios de analítica para esa fila */}
-                          <div className="space-y-2 text-sm">
-                            <h4 className="font-semibold">
-                              Servicios de analítica (por cámara)
-                            </h4>
-                            {analyticServices.length === 0 ? (
-                              <p className="text-xs text-neutral-500">
-                                Cargando lista de precios...
-                              </p>
-                            ) : (
-                              <div className="overflow-x-auto">
-                                <table className="w-full text-xs border-collapse">
-                                  <thead>
-                                    <tr className="border-b bg-neutral-50">
-                                      <th className="p-2 text-left">Incluir</th>
-                                      <th className="p-2 text-left">
-                                        Tipo de detección
-                                      </th>
-                                      <th className="p-2 text-right">
-                                        Mensual (U$)
-                                      </th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {analyticServices.map((s) => {
-                                      const included =
-                                        item.selectedServiceIds.includes(s.id);
-                                      return (
-                                        <tr
-                                          key={s.id}
-                                          className="border-b last:border-0"
-                                        >
-                                          <td className="p-2 align-middle">
-                                            <input
-                                              type="checkbox"
-                                              checked={included}
-                                              onChange={() =>
-                                                toggleCartItemService(
-                                                  activeCartIndex,
-                                                  s.id
-                                                )
-                                              }
-                                            />
-                                          </td>
-                                          <td className="p-2 align-middle">
-                                            <div className="font-semibold">
-                                              {s.categoria}
-                                            </div>
-                                            <div className="text-neutral-600">
-                                              {s.servicio}
-                                            </div>
-                                          </td>
-                                          <td className="p-2 text-right align-middle">
-                                            {s.precio_usd.toFixed(2)}
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Resumen costo vs venta de esa fila */}
-                          <div className="grid md:grid-cols-2 gap-4 text-sm mt-2">
-                            <div className="space-y-1">
-                              <h4 className="font-semibold">
-                                Costo base ({item.cantidad} cámara(s))
-                              </h4>
-                              <p>
-                                Diario total:{" "}
-                                <strong>
-                                  U$ {c.dailyTotalBase.toFixed(2)}
-                                </strong>
-                              </p>
-                              <p>
-                                Semanal total:{" "}
-                                <strong>
-                                  U$ {c.weeklyTotalBase.toFixed(2)}
-                                </strong>
-                              </p>
-                              <p>
-                                Mensual total:{" "}
-                                <strong>
-                                  U$ {c.monthlyTotalBase.toFixed(2)}
-                                </strong>
-                              </p>
-                            </div>
-                            <div className="space-y-1">
-                              <h4 className="font-semibold">
-                                Precio con margen ({item.marginPercent}%)
-                              </h4>
-                              <p>
-                                Diario total:{" "}
-                                <strong>
-                                  U$ {c.dailyTotalSale.toFixed(2)}
-                                </strong>
-                              </p>
-                              <p>
-                                Semanal total:{" "}
-                                <strong>
-                                  U$ {c.weeklyTotalSale.toFixed(2)}
-                                </strong>
-                              </p>
-                              <p>
-                                Mensual total:{" "}
-                                <strong>
-                                  U$ {c.monthlyTotalSale.toFixed(2)}
-                                </strong>
-                              </p>
-                            </div>
-                          </div>
-                        </>
-                      );
-                    })()}
-                  </div>
-                )}
-
-                {/* Resumen global de la propuesta */}
+                {/* Resumen global + margen sobre total */}
                 <div className="bg-white border rounded-xl p-4 md:p-6 space-y-4">
                   <h2 className="text-xl font-semibold">
                     Resumen global de la propuesta
                   </h2>
-                  <p className="text-sm text-neutral-600">
-                    Suma todas las filas (cámaras / grupos) y muestra el{" "}
-                    <strong>costo base</strong> frente al{" "}
-                    <strong>precio de venta con margen</strong>.
-                  </p>
 
-                  <div className="grid md:grid-cols-2 gap-4 text-sm">
+                  <div className="flex flex-col md:flex-row gap-4 items-center text-sm">
+                    <label className="flex flex-col gap-1 w-full md:w-64">
+                      Margen de ganancia sobre el total (%)
+                      <input
+                        type="number"
+                        min={0}
+                        value={globalMarginPercent}
+                        onChange={(e) =>
+                          setGlobalMarginPercent(Number(e.target.value) || 0)
+                        }
+                        className="border rounded px-2 py-1"
+                      />
+                    </label>
+                    <p className="text-xs text-neutral-600">
+                      Se aplica sobre el total mensual de todos los conceptos
+                      (la suma de todas las filas).
+                    </p>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-4 text-sm mt-2">
                     <div className="space-y-1">
                       <h3 className="font-semibold">Costo base</h3>
                       <p>
@@ -901,18 +757,20 @@ export default function HomePage() {
                       </p>
                     </div>
                     <div className="space-y-1">
-                      <h3 className="font-semibold">Precio de venta</h3>
+                      <h3 className="font-semibold">
+                        Precio de venta ({globalMarginPercent}% margen)
+                      </h3>
                       <p>
                         Diario total:{" "}
-                        <strong>U$ {cartTotals.dailySale.toFixed(2)}</strong>
+                        <strong>U$ {saleTotals.dailySale.toFixed(2)}</strong>
                       </p>
                       <p>
                         Semanal total:{" "}
-                        <strong>U$ {cartTotals.weeklySale.toFixed(2)}</strong>
+                        <strong>U$ {saleTotals.weeklySale.toFixed(2)}</strong>
                       </p>
                       <p>
                         Mensual total:{" "}
-                        <strong>U$ {cartTotals.monthlySale.toFixed(2)}</strong>
+                        <strong>U$ {saleTotals.monthlySale.toFixed(2)}</strong>
                       </p>
                     </div>
                   </div>
@@ -925,8 +783,9 @@ export default function HomePage() {
                     Generar PDF / Imprimir propuesta
                   </button>
                   <p className="text-xs text-neutral-500">
-                    Al imprimir, selecciona “Guardar como PDF” para descargar
-                    esta propuesta como documento.
+                    En la ventana de impresión, selecciona{" "}
+                    <strong>“Guardar como PDF”</strong> para descargar el
+                    documento.
                   </p>
                 </div>
               </>
