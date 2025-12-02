@@ -303,14 +303,14 @@ export default function HomePage() {
           {/* Tabs */}
           <nav className="flex gap-2 border-b pb-2 overflow-x-auto">
             <TabButton
-              label="Simulador general"
-              active={activeTab === "simulador"}
-              onClick={() => setActiveTab("simulador")}
-            />
-            <TabButton
               label="Factura por cámara"
               active={activeTab === "carrito"}
               onClick={() => setActiveTab("carrito")}
+            />
+            <TabButton
+              label="Simulador general"
+              active={activeTab === "simulador"}
+              onClick={() => setActiveTab("simulador")}
             />
             <TabButton
               label="Info & diagramas"
