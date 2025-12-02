@@ -65,7 +65,7 @@ function getRecordingInfo(
 
 export default function HomePage() {
   const [prices, setPrices] = useState<PriceRow[]>([]);
-  const [activeTab, setActiveTab] = useState<TabId>("simulador");
+  const [activeTab, setActiveTab] = useState<TabId>("carrito");
 
   // Tasa de cambio editable (COP por 1 USD)
   const [exchangeRateCopPerUsd, setExchangeRateCopPerUsd] =
