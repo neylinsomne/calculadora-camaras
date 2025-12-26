@@ -1,1526 +1,853 @@
-// src/app/page.tsx
+// src/app/page_add.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Image from "next/image";
-import type { PriceRow } from "@/lib/prices";
+import type { SolutionDef, PriceRow } from "@/lib/prices";
 
-type TabId = "nuestros_precios" | "simulador" | "info" | "carrito";
+// --- TIPOS ---
+
+type TabId = "propios" | "terceros" | "info";
+
+type CameraCartItem = {
+    id: string;
+    nombre: string;
+    cantidad: number;
+    selectedSolutionIds: string[]; // Para precios propios (SolutionDef)
+    selectedServiceIds: number[]; // Para precios terceros (PriceRow)
+    selectedRecording: "local" | number;
+};
 
 // Precio de grabación local en USD
-const LOCAL_RECORDING_PRICE = 1.5; // 1.50 USD / cámara
+const LOCAL_RECORDING_PRICE = 1.5;
 
-// Descripción corta por tab
-const TAB_DESCRIPTIONS: Record<TabId, string> = {
-  nuestros_precios:
-    "Lista oficial de precios (cámaras + analíticas).",
-  simulador:
-    "Vista general para estimar rápidamente el costo por cámara y por grupo.",
-  carrito:
-    "Factura editable: cada fila es una cámara/grupo, con servicios por columna y margen global.",
-  info: "Resumen conceptual de arquitectura y costos ocultos de operar modelos propios vs servicio gestionado.",
-};
-
-type RecordingChoice = "local" | number;
-
-// Fila de la factura
-type CameraCartItem = {
-  id: string;
-  nombre: string;
-  cantidad: number;
-  selectedServiceIds: number[]; // servicios de analítica
-  selectedRecording: RecordingChoice; // local o nube
-};
-
-// --- Utilidades ---
+// --- UTILIDADES ---
 
 function usdToCop(valueUsd: number, rate: number) {
-  return valueUsd * rate;
+    return valueUsd * rate;
 }
 
 function computeDaily(monthly: number) {
-  return monthly / 30;
+    return monthly / 30;
 }
 
 function computeWeekly(monthly: number) {
-  return (monthly * 7) / 30;
+    return (monthly * 7) / 30;
 }
 
 function getRecordingInfo(
-  choice: RecordingChoice | null,
-  recordingOptions: PriceRow[]
+    choice: "local" | number | null,
+    recordingOptions: PriceRow[]
 ) {
-  if (!choice) return null;
-  if (choice === "local") {
+    if (!choice) return null;
+    if (choice === "local") {
+        return {
+            modalidad: "Grabación local",
+            precio_usd: LOCAL_RECORDING_PRICE,
+        };
+    }
+    const found = recordingOptions.find((r) => r.id === choice);
+    if (!found) return null;
     return {
-      modalidad: "Grabación local",
-      precio_usd: LOCAL_RECORDING_PRICE,
+        modalidad: found.modalidad,
+        precio_usd: found.precio_usd,
     };
-  }
-  const found = recordingOptions.find((r) => r.id === choice);
-  if (!found) return null;
-  return {
-    modalidad: found.modalidad,
-    precio_usd: found.precio_usd,
-  };
 }
 
 export default function HomePage() {
-  const [prices, setPrices] = useState<PriceRow[]>([]);
-  const [activeTab, setActiveTab] = useState<TabId>("nuestros_precios");
+    const [activeTab, setActiveTab] = useState<TabId>("propios");
 
-  // Tasa de cambio editable (COP por 1 USD)
-  const [exchangeRateCopPerUsd, setExchangeRateCopPerUsd] =
-    useState<number>(4000);
+    // Datos del nuevo schema (precios.xlsx - Propios)
+    const [solutionsData, setSolutionsData] = useState<SolutionDef[]>([]);
 
-  // Simulador general
-  const [numCamaras, setNumCamaras] = useState<number>(10);
-  const [selectedServiceIds, setSelectedServiceIds] = useState<number[]>([]);
-  const [selectedRecordingId, setSelectedRecordingId] =
-    useState<RecordingChoice>("local");
+    // Datos del viejo schema (precios_software_seguridad_nube.xlsx - Terceros)
+    const [oldPrices, setOldPrices] = useState<PriceRow[]>([]);
 
-  // Factura / carrito
-  const [cartItems, setCartItems] = useState<CameraCartItem[]>([]);
-  const [globalMarginPercent, setGlobalMarginPercent] = useState<number>(30);
+    const [loading, setLoading] = useState(true);
 
-  // cargar precios del backend
-  useEffect(() => {
-    fetch("/api/precios")
-      .then((res) => res.json())
-      .then((data: PriceRow[]) => setPrices(data))
-      .catch((err) => console.error(err));
-  }, []);
+    // Configuración Global
+    const [exchangeRate, setExchangeRate] = useState<number>(4000);
+    const [globalMarginPercent, setGlobalMarginPercent] = useState<number>(30);
 
-  // separar servicios de analítica vs grabación en la nube
-  const analyticServices = prices.filter(
-    (p) => p.categoria !== "GRABACIÓN VIDEO"
-  );
-  const recordingOptions = prices.filter(
-    (p) => p.categoria === "GRABACIÓN VIDEO"
-  );
-
-  // --- TAB 1: simulador general ---
-
-  const toggleServiceSelected = (id: number) => {
-    setSelectedServiceIds((prev) =>
-      prev.includes(id) ? prev.filter((sid) => sid !== id) : [...prev, id]
-    );
-  };
-
-  const selectedAnalyticServices = analyticServices.filter((s) =>
-    selectedServiceIds.includes(s.id)
-  );
-
-  const selectedRecordingInfo = getRecordingInfo(
-    selectedRecordingId,
-    recordingOptions
-  );
-
-  const monthlyPerCameraUsd =
-    selectedAnalyticServices.reduce((acc, s) => acc + s.precio_usd, 0) +
-    (selectedRecordingInfo?.precio_usd ?? 0);
-
-  const dailyPerCameraUsd = computeDaily(monthlyPerCameraUsd);
-  const weeklyPerCameraUsd = computeWeekly(monthlyPerCameraUsd);
-
-  const monthlyTotalUsd = monthlyPerCameraUsd * numCamaras;
-  const dailyTotalUsd = dailyPerCameraUsd * numCamaras;
-  const weeklyTotalUsd = weeklyPerCameraUsd * numCamaras;
-
-  // --- TAB 2: factura / carrito ---
-
-  const addCartItem = () => {
-    setCartItems((prev) => [
-      ...prev,
-      {
-        id: `CAM-${prev.length + 1}`,
-        nombre: "",
-        cantidad: 1,
-        selectedServiceIds: [],
-        selectedRecording: "local",
-      },
+    // Estado del Carrito para Propios
+    const [cartItemsPropios, setCartItemsPropios] = useState<CameraCartItem[]>([
+        {
+            id: "CAM-01",
+            nombre: "Entrada Principal",
+            cantidad: 1,
+            selectedSolutionIds: [],
+            selectedServiceIds: [],
+            selectedRecording: "local",
+        },
     ]);
-  };
 
-  const removeCartItem = (index: number) => {
-    setCartItems((prev) => prev.filter((_, i) => i !== index));
-  };
+    // Estado del Carrito para Terceros
+    const [cartItemsTerceros, setCartItemsTerceros] = useState<CameraCartItem[]>([]);
 
-  const updateCartItemField = <K extends keyof CameraCartItem>(
-    index: number,
-    field: K,
-    value: CameraCartItem[K]
-  ) => {
-    setCartItems((prev) =>
-      prev.map((item, i) => (i === index ? { ...item, [field]: value } : item))
+    // Cargar datos de ambos schemas
+    useEffect(() => {
+        Promise.all([
+            fetch("/api/precios").then((res) => res.json()),
+            fetch("/api/precios-old").then((res) => res.json()),
+        ])
+            .then(([newData, oldData]) => {
+                setSolutionsData(newData as SolutionDef[]);
+                setOldPrices(oldData as PriceRow[]);
+                setLoading(false);
+            })
+            .catch((err) => {
+                console.error("Error cargando precios:", err);
+                setLoading(false);
+            });
+    }, []);
+
+    // Separar servicios de analítica vs grabación (terceros)
+    const analyticServices = oldPrices.filter(
+        (p) => p.categoria !== "GRABACIÓN DE VIDEO EN LA NUBE"
     );
-  };
+    const recordingOptions = oldPrices.filter(
+        (p) => p.categoria === "GRABACIÓN DE VIDEO EN LA NUBE"
+    );
 
-  const toggleCartItemService = (index: number, serviceId: number) => {
-    setCartItems((prev) =>
-      prev.map((item, i) => {
-        if (i !== index) return item;
-        const already = item.selectedServiceIds.includes(serviceId);
+    // --- LÓGICA CARRITO PROPIOS ---
+
+    const getSolutionBaseCost = (solutionId: string): number => {
+        const sol = solutionsData.find((s) => s.id === solutionId);
+        if (!sol) return 0;
+        return sol.components.reduce((acc, c) => acc + c.costUsd, 0);
+    };
+
+    const addCartItemPropios = () => {
+        setCartItemsPropios((prev) => [
+            ...prev,
+            {
+                id: `CAM-0${prev.length + 1}`,
+                nombre: "",
+                cantidad: 1,
+                selectedSolutionIds: [],
+                selectedServiceIds: [],
+                selectedRecording: "local",
+            },
+        ]);
+    };
+
+    const removeCartItemPropios = (index: number) => {
+        setCartItemsPropios((prev) => prev.filter((_, i) => i !== index));
+    };
+
+    const updateCartItemFieldPropios = <K extends keyof CameraCartItem>(
+        index: number,
+        field: K,
+        value: CameraCartItem[K]
+    ) => {
+        setCartItemsPropios((prev) =>
+            prev.map((item, i) => (i === index ? { ...item, [field]: value } : item))
+        );
+    };
+
+    const toggleSolutionPropios = (index: number, solutionId: string) => {
+        setCartItemsPropios((prev) =>
+            prev.map((item, i) => {
+                if (i !== index) return item;
+                const already = item.selectedSolutionIds.includes(solutionId);
+                return {
+                    ...item,
+                    selectedSolutionIds: already
+                        ? item.selectedSolutionIds.filter((id) => id !== solutionId)
+                        : [...item.selectedSolutionIds, solutionId],
+                };
+            })
+        );
+    };
+
+    // --- LÓGICA CARRITO TERCEROS ---
+
+    const addCartItemTerceros = () => {
+        setCartItemsTerceros((prev) => [
+            ...prev,
+            {
+                id: `CAM-${prev.length + 1}`,
+                nombre: "",
+                cantidad: 1,
+                selectedSolutionIds: [],
+                selectedServiceIds: [],
+                selectedRecording: "local",
+            },
+        ]);
+    };
+
+    const removeCartItemTerceros = (index: number) => {
+        setCartItemsTerceros((prev) => prev.filter((_, i) => i !== index));
+    };
+
+    const updateCartItemFieldTerceros = <K extends keyof CameraCartItem>(
+        index: number,
+        field: K,
+        value: CameraCartItem[K]
+    ) => {
+        setCartItemsTerceros((prev) =>
+            prev.map((item, i) => (i === index ? { ...item, [field]: value } : item))
+        );
+    };
+
+    const toggleCartItemService = (index: number, serviceId: number) => {
+        setCartItemsTerceros((prev) =>
+            prev.map((item, i) => {
+                if (i !== index) return item;
+                const already = item.selectedServiceIds.includes(serviceId);
+                return {
+                    ...item,
+                    selectedServiceIds: already
+                        ? item.selectedServiceIds.filter((sid) => sid !== serviceId)
+                        : [...item.selectedServiceIds, serviceId],
+                };
+            })
+        );
+    };
+
+    // --- CÁLCULOS PROPIOS ---
+
+    const cartCalcPropios = useMemo(() => {
+        let totalMonthlyBaseUsd = 0;
+
+        const rows = cartItemsPropios.map((item) => {
+            const unitBaseUsd = item.selectedSolutionIds.reduce(
+                (acc, sid) => acc + getSolutionBaseCost(sid),
+                0
+            );
+            const rowTotalBaseUsd = unitBaseUsd * item.cantidad;
+            totalMonthlyBaseUsd += rowTotalBaseUsd;
+
+            return {
+                ...item,
+                unitBaseUsd,
+                rowTotalBaseUsd,
+            };
+        });
+
+        const marginFactor = 1 + globalMarginPercent / 100;
+        const totalMonthlySaleUsd = totalMonthlyBaseUsd * marginFactor;
+
         return {
-          ...item,
-          selectedServiceIds: already
-            ? item.selectedServiceIds.filter((sid) => sid !== serviceId)
-            : [...item.selectedServiceIds, serviceId],
+            rows,
+            totalMonthlyBaseUsd,
+            totalMonthlySaleUsd,
         };
-      })
-    );
-  };
+    }, [cartItemsPropios, globalMarginPercent, solutionsData]);
 
-  // costos base por fila (sin margen, en USD)
-  const computeCartItemCosts = (item: CameraCartItem) => {
-    const analyticSelected = analyticServices.filter((s) =>
-      item.selectedServiceIds.includes(s.id)
-    );
-    const recordingInfo = getRecordingInfo(
-      item.selectedRecording,
-      recordingOptions
-    );
+    // --- CÁLCULOS TERCEROS ---
 
-    const monthlyPerCameraBaseUsd =
-      analyticSelected.reduce((acc, s) => acc + s.precio_usd, 0) +
-      (recordingInfo?.precio_usd ?? 0);
+    const computeCartItemCostsTerceros = (item: CameraCartItem) => {
+        const analyticSelected = analyticServices.filter((s) =>
+            item.selectedServiceIds.includes(s.id)
+        );
+        const recordingInfo = getRecordingInfo(item.selectedRecording, recordingOptions);
 
-    const monthlyTotalBaseUsd = monthlyPerCameraBaseUsd * item.cantidad;
-    const dailyTotalBaseUsd =
-      computeDaily(monthlyPerCameraBaseUsd) * item.cantidad;
-    const weeklyTotalBaseUsd =
-      computeWeekly(monthlyPerCameraBaseUsd) * item.cantidad;
+        const monthlyPerCameraBaseUsd =
+            analyticSelected.reduce((acc, s) => acc + s.precio_usd, 0) +
+            (recordingInfo?.precio_usd ?? 0);
 
-    return {
-      analyticSelected,
-      recordingInfo,
-      monthlyPerCameraBaseUsd,
-      monthlyTotalBaseUsd,
-      weeklyTotalBaseUsd,
-      dailyTotalBaseUsd,
+        const monthlyTotalBaseUsd = monthlyPerCameraBaseUsd * item.cantidad;
+        const dailyTotalBaseUsd = computeDaily(monthlyPerCameraBaseUsd) * item.cantidad;
+        const weeklyTotalBaseUsd = computeWeekly(monthlyPerCameraBaseUsd) * item.cantidad;
+
+        return {
+            analyticSelected,
+            recordingInfo,
+            monthlyPerCameraBaseUsd,
+            monthlyTotalBaseUsd,
+            weeklyTotalBaseUsd,
+            dailyTotalBaseUsd,
+        };
     };
-  };
 
-  // totales base en USD
-  const cartTotalsUsd = cartItems.reduce(
-    (acc, item) => {
-      const c = computeCartItemCosts(item);
-      acc.monthlyCost += c.monthlyTotalBaseUsd;
-      acc.weeklyCost += c.weeklyTotalBaseUsd;
-      acc.dailyCost += c.dailyTotalBaseUsd;
-      return acc;
-    },
-    {
-      monthlyCost: 0,
-      weeklyCost: 0,
-      dailyCost: 0,
-    }
-  );
+    const cartTotalsTerceros = cartItemsTerceros.reduce(
+        (acc, item) => {
+            const c = computeCartItemCostsTerceros(item);
+            acc.monthlyCost += c.monthlyTotalBaseUsd;
+            acc.weeklyCost += c.weeklyTotalBaseUsd;
+            acc.dailyCost += c.dailyTotalBaseUsd;
+            return acc;
+        },
+        { monthlyCost: 0, weeklyCost: 0, dailyCost: 0 }
+    );
 
-  // margen GLOBAL sobre el total
-  const factor = 1 + (globalMarginPercent || 0) / 100;
-  const saleTotalsUsd = {
-    dailySale: cartTotalsUsd.dailyCost * factor,
-    weeklySale: cartTotalsUsd.weeklyCost * factor,
-    monthlySale: cartTotalsUsd.monthlyCost * factor,
-  };
+    const factorTerceros = 1 + (globalMarginPercent || 0) / 100;
+    const saleTotalsTerceros = {
+        dailySale: cartTotalsTerceros.dailyCost * factorTerceros,
+        weeklySale: cartTotalsTerceros.weeklyCost * factorTerceros,
+        monthlySale: cartTotalsTerceros.monthlyCost * factorTerceros,
+    };
 
-  // IDs duplicados (para validar antes del PDF)
-  const idCounts = cartItems.reduce((map, item) => {
-    const trimmed = item.id.trim();
-    if (!trimmed) return map;
-    const key = trimmed.toLowerCase();
-    map[key] = (map[key] || 0) + 1;
-    return map;
-  }, {} as Record<string, number>);
+    // --- HANDLERS ---
+    const handlePrint = () => window.print();
 
-  const duplicateIdSet = new Set(
-    Object.entries(idCounts)
-      .filter(([, count]) => count > 1)
-      .map(([key]) => key)
-  );
-  const hasDuplicateIds = duplicateIdSet.size > 0;
-
-  const handlePrintPdf = () => {
-    if (hasDuplicateIds) {
-      alert(
-        "Hay IDs de cámara repetidos. Corrige los duplicados antes de generar el PDF."
-      );
-      return;
-    }
-    if (cartItems.length === 0) {
-      alert("No hay filas en la propuesta para imprimir.");
-      return;
-    }
-    window.print();
-  };
-
-  return (
-    <>
-      {/* UI normal, solo pantalla */}
-      <main className="min-h-screen bg-neutral-100 no-print">
-        {/* Header */}
-        <header className="border-b bg-white">
-          <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center gap-4 px-6 py-4">
-            <div className="flex-1">
-              <div className="flex items-center gap-3 mb-2">
-                <Image
-                  src="/logo-empresa.png"
-                  alt="Logo de la empresa"
-                  width={40}
-                  height={40}
-                  className="rounded-md object-contain"
-                />
-                <div>
-                  <h1 className="text-2xl md:text-3xl font-bold">
-                    Simulador de servicios: Cámaras + IA
-                  </h1>
-                  <p className="text-xs md:text-sm text-neutral-500">
-                    Comparador rápido de costos por tipo de detección y
-                    grabación en la nube.
-                  </p>
-                </div>
-              </div>
-
-              <p className="text-sm md:text-base text-neutral-600">
-                Marca qué detecciones quieres (placa, facial, objetos,
-                fuego/humo, etc.), ajusta el número de cámaras y visualiza el
-                costo diario, semanal y mensual.
-              </p>
+    if (loading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-slate-50">
+                <p className="text-slate-500">Cargando lista de precios...</p>
             </div>
+        );
+    }
 
-            <div className="w-full md:w-64 h-32 relative">
-              <Image
-                src="/header-ia.png"
-                alt="Arquitectura de cámaras con IA"
-                fill
-                className="object-cover rounded-lg"
-              />
-            </div>
-          </div>
-        </header>
-
-        {/* Contenido principal */}
-        <div className="max-w-6xl mx-auto px-6 py-6 space-y-6">
-          {/* Tabs */}
-          <nav className="flex gap-2 border-b pb-2 overflow-x-auto">
-            <TabButton
-              label="Nuestros Precios"
-              active={activeTab === "nuestros_precios"}
-              onClick={() => setActiveTab("nuestros_precios")}
-            />
-            <TabButton
-              label="Factura por cámara"
-              active={activeTab === "carrito"}
-              onClick={() => setActiveTab("carrito")}
-            />
-            <TabButton
-              label="Simulador general"
-              active={activeTab === "simulador"}
-              onClick={() => setActiveTab("simulador")}
-            />
-            <TabButton
-              label="Info & diagramas"
-              active={activeTab === "info"}
-              onClick={() => setActiveTab("info")}
-            />
-          </nav>
-
-          {/* Descripción corta del tab activo */}
-          <p className="mt-2 text-xs md:text-sm text-neutral-500">
-            {TAB_DESCRIPTIONS[activeTab]}
-          </p>
-
-          {/* Selector global de tasa de cambio */}
-          <div className="bg-white border rounded-xl p-3 md:p-4 flex flex-col md:flex-row gap-3 items-center text-xs md:text-sm">
-            <div className="flex-1">
-              <p className="font-medium">Tasa de cambio usada</p>
-              <p className="text-neutral-600">
-                Los valores en COP se calculan con esta tasa (COP por 1 USD).
-                Puedes ajustarla antes de generar la propuesta.
-              </p>
-            </div>
-            <label className="flex items-center gap-2">
-              <span>COP / USD:</span>
-              <input
-                type="number"
-                min={1000}
-                value={exchangeRateCopPerUsd}
-                onChange={(e) =>
-                  setExchangeRateCopPerUsd(Number(e.target.value) || 0)
-                }
-                className="w-24 border rounded px-2 py-1 text-right"
-              />
-            </label>
-          </div>
-
-          {/* TAB 2: Factura / carrito en tabla con columnas por servicio */}
-          {activeTab === "carrito" && (
-            <section className="space-y-6">
-              <div className="bg-white border rounded-xl p-4 md:p-6 space-y-3">
-                <h2 className="text-xl font-semibold">
-                  Factura / propuesta por cámara
-                </h2>
-                <p className="text-sm text-neutral-600">
-                  Cada fila representa una cámara (o grupo de cámaras). Las
-                  columnas centrales son los servicios; si el checkbox está
-                  seleccionado, aparece el precio mensual por ese grupo.
-                </p>
-                <button
-                  type="button"
-                  onClick={addCartItem}
-                  className="inline-flex items-center justify-center rounded-md border px-3 py-1.5 text-sm font-medium bg-black text-white hover:bg-neutral-800"
-                >
-                  + Agregar fila
-                </button>
-              </div>
-
-              {cartItems.length === 0 ? (
-                <p className="text-sm text-neutral-500">
-                  No hay filas en la propuesta. Haz clic en{" "}
-                  <strong>“Agregar fila”</strong> para comenzar.
-                </p>
-              ) : (
-                <>
-                  {/* Tabla editable tipo factura */}
-                  <div className="bg-white border rounded-xl p-4 md:p-6 space-y-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <h3 className="text-lg font-semibold">
-                        Detalle de cámaras
-                      </h3>
-                      <p className="text-xs text-neutral-500">
-                        Los campos son editables directamente en la tabla.
-                      </p>
-                    </div>
-
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs md:text-sm border-collapse">
-                        <thead>
-                          <tr className="border-b bg-neutral-50">
-                            <th className="p-2 text-left">ID</th>
-                            <th className="p-2 text-left">Descripción</th>
-                            <th className="p-2 text-right">Cant.</th>
-                            <th className="p-2 text-left">Grabación</th>
-                            {/* Columnas por servicio */}
-                            {analyticServices.map((s) => (
-                              <th key={s.id} className="p-2 text-center">
-                                {s.categoria}
-                              </th>
-                            ))}
-                            <th className="p-2 text-right">
-                              Subtotal mensual (COP$)
-                            </th>
-                            <th className="p-2 text-center">Acciones</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {cartItems.map((item, rowIndex) => {
-                            const c = computeCartItemCosts(item);
-
-                            const trimmedId = item.id.trim();
-                            const isDuplicateId =
-                              trimmedId !== "" &&
-                              duplicateIdSet.has(trimmedId.toLowerCase());
-
-                            const monthlyTotalBaseCop = usdToCop(
-                              c.monthlyTotalBaseUsd,
-                              exchangeRateCopPerUsd
-                            );
-
-                            return (
-                              <tr
-                                key={rowIndex}
-                                className="border-b last:border-0 hover:bg-neutral-50"
-                              >
-                                {/* ID editable */}
-                                <td className="p-2 align-middle">
-                                  <div className="flex flex-col gap-1">
-                                    <input
-                                      type="text"
-                                      value={item.id}
-                                      onChange={(e) =>
-                                        updateCartItemField(
-                                          rowIndex,
-                                          "id",
-                                          e.target.value
-                                        )
-                                      }
-                                      className={`w-20 border rounded px-1 py-0.5 text-xs ${isDuplicateId ? "border-red-400" : ""
-                                        }`}
-                                    />
-                                    {isDuplicateId && (
-                                      <span className="text-[0.65rem] text-red-500">
-                                        ID repetido en otra fila
-                                      </span>
-                                    )}
-                                  </div>
-                                </td>
-
-                                {/* Descripción editable */}
-                                <td className="p-2 align-middle">
-                                  <input
-                                    type="text"
-                                    placeholder="Portería, Bodega, etc."
-                                    value={item.nombre}
-                                    onChange={(e) =>
-                                      updateCartItemField(
-                                        rowIndex,
-                                        "nombre",
-                                        e.target.value
-                                      )
-                                    }
-                                    className="w-40 md:w-56 border rounded px-1 py-0.5 text-xs"
-                                  />
-                                </td>
-
-                                {/* Cantidad */}
-                                <td className="p-2 align-middle text-right">
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    value={item.cantidad}
-                                    onChange={(e) => {
-                                      const value = e.target.value;
-                                      if (value === "") {
-                                        // permitimos vacío mientras escribe
-                                        updateCartItemField(
-                                          rowIndex,
-                                          "cantidad",
-                                          0
-                                        );
-                                        return;
-                                      }
-                                      const n = Number(value);
-                                      if (!Number.isNaN(n) && n >= 0) {
-                                        updateCartItemField(
-                                          rowIndex,
-                                          "cantidad",
-                                          n
-                                        );
-                                      }
-                                    }}
-                                    className="w-16 border rounded px-1 py-0.5 text-xs text-right"
-                                  />
-                                </td>
-
-                                {/* Grabación local / nube */}
-                                <td className="p-2 align-middle">
-                                  <select
-                                    value={item.selectedRecording}
-                                    onChange={(e) => {
-                                      const value = e.target.value;
-                                      if (value === "local") {
-                                        updateCartItemField(
-                                          rowIndex,
-                                          "selectedRecording",
-                                          "local"
-                                        );
-                                      } else {
-                                        updateCartItemField(
-                                          rowIndex,
-                                          "selectedRecording",
-                                          Number(value)
-                                        );
-                                      }
-                                    }}
-                                    className="border rounded px-1 py-0.5 text-xs"
-                                  >
-                                    <option value="local">
-                                      Local – U${" "}
-                                      {LOCAL_RECORDING_PRICE.toFixed(2)}/cam
-                                    </option>
-                                    {recordingOptions.map((r) => (
-                                      <option key={r.id} value={r.id}>
-                                        {r.modalidad} – U${" "}
-                                        {r.precio_usd.toFixed(2)}/cam
-                                      </option>
-                                    ))}
-                                  </select>
-                                </td>
-
-                                {/* Columnas de servicios (checkbox + precio si está marcado) */}
-                                {analyticServices.map((s) => {
-                                  const included =
-                                    item.selectedServiceIds.includes(s.id);
-                                  const monthlyRowPriceUsd =
-                                    s.precio_usd * item.cantidad;
-                                  const monthlyRowPriceCop = usdToCop(
-                                    monthlyRowPriceUsd,
-                                    exchangeRateCopPerUsd
-                                  );
-                                  return (
-                                    <td
-                                      key={s.id}
-                                      className="p-2 align-middle text-center"
-                                    >
-                                      <label className="inline-flex flex-col items-center gap-1">
-                                        <input
-                                          type="checkbox"
-                                          checked={included}
-                                          onChange={() =>
-                                            toggleCartItemService(
-                                              rowIndex,
-                                              s.id
-                                            )
-                                          }
-                                        />
-                                        {included && (
-                                          <span className="text-[0.65rem] md:text-xs text-neutral-700">
-                                            ≈ $ {monthlyRowPriceCop.toFixed(0)}{" "}
-                                            COP
-                                          </span>
-                                        )}
-                                      </label>
-                                    </td>
-                                  );
-                                })}
-
-                                {/* Subtotal mensual base en COP */}
-                                <td className="p-2 align-middle text-right font-semibold">
-                                  ${monthlyTotalBaseCop.toFixed(0)} COP
-                                </td>
-
-                                {/* Borrar fila */}
-                                <td className="p-2 align-middle text-center">
-                                  <button
-                                    type="button"
-                                    onClick={() => removeCartItem(rowIndex)}
-                                    className="text-xs text-red-500 hover:underline"
-                                  >
-                                    Borrar
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  {/* Resumen global + margen sobre total */}
-                  <div className="bg-white border rounded-xl p-4 md:p-6 space-y-4">
-                    <h2 className="text-xl font-semibold">
-                      Resumen global de la propuesta
-                    </h2>
-
-                    <div className="flex flex-col md:flex-row gap-4 items-center text-sm">
-                      <label className="flex flex-col gap-1 w-full md:w-64">
-                        Margen de ganancia sobre el total (%)
-                        <input
-                          type="number"
-                          min={0}
-                          value={globalMarginPercent}
-                          onChange={(e) =>
-                            setGlobalMarginPercent(Number(e.target.value) || 0)
-                          }
-                          className="border rounded px-2 py-1"
-                        />
-                      </label>
-                      <p className="text-xs text-neutral-600">
-                        Se aplica sobre el total mensual de todos los conceptos
-                        (la suma de todas las filas).
-                      </p>
-                    </div>
-
-                    <div className="grid md:grid-cols-2 gap-4 text-sm mt-2">
-                      <div className="space-y-1">
-                        <h3 className="font-semibold">Costo base</h3>
-                        <p>
-                          Diario total:{" "}
-                          <strong>
-                            U$ {cartTotalsUsd.dailyCost.toFixed(2)}
-                          </strong>
-                          <div className="text-[0.7rem] text-neutral-500">
-                            ≈ ${" "}
-                            {usdToCop(
-                              cartTotalsUsd.dailyCost,
-                              exchangeRateCopPerUsd
-                            ).toFixed(0)}{" "}
-                            COP
-                          </div>
-                        </p>
-                        <p>
-                          Semanal total:{" "}
-                          <strong>
-                            U$ {cartTotalsUsd.weeklyCost.toFixed(2)}
-                          </strong>
-                          <div className="text-[0.7rem] text-neutral-500">
-                            ≈ ${" "}
-                            {usdToCop(
-                              cartTotalsUsd.weeklyCost,
-                              exchangeRateCopPerUsd
-                            ).toFixed(0)}{" "}
-                            COP
-                          </div>
-                        </p>
-                        <p>
-                          Mensual total:{" "}
-                          <strong>
-                            U$ {cartTotalsUsd.monthlyCost.toFixed(2)}
-                          </strong>
-                          <div className="text-[0.7rem] text-neutral-500">
-                            ≈ ${" "}
-                            {usdToCop(
-                              cartTotalsUsd.monthlyCost,
-                              exchangeRateCopPerUsd
-                            ).toFixed(0)}{" "}
-                            COP
-                          </div>
-                        </p>
-                      </div>
-                      <div className="space-y-1">
-                        <h3 className="font-semibold">
-                          Precio de venta ({globalMarginPercent}% margen)
-                        </h3>
-                        <p>
-                          Diario total:{" "}
-                          <strong>
-                            U$ {saleTotalsUsd.dailySale.toFixed(2)}
-                          </strong>
-                          <div className="text-[0.7rem] text-neutral-500">
-                            ≈ ${" "}
-                            {usdToCop(
-                              saleTotalsUsd.dailySale,
-                              exchangeRateCopPerUsd
-                            ).toFixed(0)}{" "}
-                            COP
-                          </div>
-                        </p>
-                        <p>
-                          Semanal total:{" "}
-                          <strong>
-                            U$ {saleTotalsUsd.weeklySale.toFixed(2)}
-                          </strong>
-                          <div className="text-[0.7rem] text-neutral-500">
-                            ≈ ${" "}
-                            {usdToCop(
-                              saleTotalsUsd.weeklySale,
-                              exchangeRateCopPerUsd
-                            ).toFixed(0)}{" "}
-                            COP
-                          </div>
-                        </p>
-                        <p>
-                          Mensual total:{" "}
-                          <strong>
-                            U$ {saleTotalsUsd.monthlySale.toFixed(2)}
-                          </strong>
-                          <div className="text-[0.7rem] text-neutral-500">
-                            ≈ ${" "}
-                            {usdToCop(
-                              saleTotalsUsd.monthlySale,
-                              exchangeRateCopPerUsd
-                            ).toFixed(0)}{" "}
-                            COP
-                          </div>
-                        </p>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={handlePrintPdf}
-                      disabled={hasDuplicateIds || cartItems.length === 0}
-                      className={`inline-flex items-center justify-center rounded-md border px-3 py-1.5 text-sm font-medium ${hasDuplicateIds || cartItems.length === 0
-                          ? "bg-neutral-300 text-neutral-500 cursor-not-allowed"
-                          : "bg-black text-white hover:bg-neutral-800"
-                        }`}
-                    >
-                      Generar PDF / Imprimir propuesta
-                    </button>
-                    {hasDuplicateIds && (
-                      <p className="text-xs text-red-500 mt-1">
-                        Hay IDs de cámara repetidos; deben ser únicos para esta
-                        cotización.
-                      </p>
-                    )}
-                    {cartItems.length === 0 && (
-                      <p className="text-xs text-neutral-500 mt-1">
-                        Agrega al menos una fila para generar la propuesta.
-                      </p>
-                    )}
-                    <p className="text-xs text-neutral-500">
-                      En la ventana de impresión, selecciona{" "}
-                      <strong>“Guardar como PDF”</strong> para descargar el
-                      documento.
-                    </p>
-                  </div>
-                </>
-              )}
-            </section>
-          )}
-
-          {/* TAB 1: Simulador general / Nuestros Precios */}
-          {(activeTab === "simulador" || activeTab === "nuestros_precios") && (
-            <section className="space-y-6">
-              {/* Número de cámaras */}
-              <div className="bg-white border rounded-xl p-4 md:p-6 space-y-4">
-                <h2 className="text-xl font-semibold">
-                  Parámetros de simulación
-                </h2>
-                <div className="flex flex-col md:flex-row gap-4 items-center">
-                  <label className="flex flex-col gap-1 w-full md:w-64">
-                    Número de cámaras
-                    <input
-                      type="number"
-                      min={1}
-                      value={numCamaras}
-                      onChange={(e) =>
-                        setNumCamaras(Math.max(1, Number(e.target.value) || 1))
-                      }
-                      className="border rounded px-2 py-1"
-                    />
-                  </label>
-                  <p className="text-sm text-neutral-600">
-                    El costo total se calcula multiplicando el costo por cámara
-                    por este número.
-                  </p>
-                </div>
-              </div>
-
-              {/* Servicios de analítica */}
-              <div className="bg-white border rounded-xl p-4 md:p-6 space-y-4">
-                <h2 className="text-xl font-semibold">
-                  Servicios de analítica por tipo de detección
-                </h2>
-                <p className="text-sm text-neutral-600">
-                  Marca qué tipos de detección quieres activar en cada cámara
-                  (placa, facial, objetos, EPI, fuego y humo).
-                </p>
-
-                {analyticServices.length === 0 ? (
-                  <p className="text-sm text-neutral-500">
-                    Cargando lista de precios...
-                  </p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm border-collapse">
-                      <thead>
-                        <tr className="border-b bg-neutral-50">
-                          <th className="text-left p-2">Incluir</th>
-                          <th className="text-left p-2">Tipo de detección</th>
-                          <th className="text-left p-2">Etiqueta</th>
-                          <th className="text-right p-2">
-                            Mensual por cámara (U$)
-                          </th>
-                          <th className="text-right p-2">
-                            Diario por cámara (U$)
-                          </th>
-                          <th className="text-right p-2">
-                            Semanal por cámara (U$)
-                          </th>
-                        </tr>
-                      </thead>
-
-                      <tbody>
-                        {analyticServices.map((s) => {
-                          const monthly = s.precio_usd;
-                          const daily = computeDaily(monthly);
-                          const weekly = computeWeekly(monthly);
-
-                          const included = selectedServiceIds.includes(s.id);
-
-                          return (
-                            <tr
-                              key={s.id}
-                              className="border-b last:border-0 hover:bg-neutral-50"
-                            >
-                              <td className="p-2 align-middle">
-                                <input
-                                  type="checkbox"
-                                  checked={included}
-                                  onChange={() => toggleServiceSelected(s.id)}
-                                />
-                              </td>
-                              <td className="p-2 align-middle">
-                                <div className="font-semibold">
-                                  {s.categoria}
-                                </div>
-                                <div className="text-neutral-600">
-                                  {s.servicio}
-                                </div>
-                              </td>
-                              <td className="p-2 align-middle text-sm text-neutral-600">
-                                {s.etiqueta}
-                              </td>
-                              <td className="p-2 text-right align-middle">
-                                U$ {monthly.toFixed(2)}
-                                <div className="text-[0.7rem] text-neutral-500">
-                                  ≈ ${" "}
-                                  {usdToCop(
-                                    monthly,
-                                    exchangeRateCopPerUsd
-                                  ).toFixed(0)}{" "}
-                                  COP
-                                </div>
-                              </td>
-                              <td className="p-2 text-right align-middle">
-                                U$ {daily.toFixed(2)}
-                                <div className="text-[0.7rem] text-neutral-500">
-                                  ≈ ${" "}
-                                  {usdToCop(
-                                    daily,
-                                    exchangeRateCopPerUsd
-                                  ).toFixed(0)}{" "}
-                                  COP
-                                </div>
-                              </td>
-                              <td className="p-2 text-right align-middle">
-                                U$ {weekly.toFixed(2)}
-                                <div className="text-[0.7rem] text-neutral-500">
-                                  ≈ ${" "}
-                                  {usdToCop(
-                                    weekly,
-                                    exchangeRateCopPerUsd
-                                  ).toFixed(0)}{" "}
-                                  COP
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              {/* Grabación local / nube */}
-              <div className="bg-white border rounded-xl p-4 md:p-6 space-y-4">
-                <h2 className="text-xl font-semibold">
-                  Grabación de video (local o nube)
-                </h2>
-                <p className="text-sm text-neutral-600">
-                  Elige entre <strong>grabación local</strong> (ej. NVR/DVR,
-                  costo estimado) o un plan de grabación en la nube con días de
-                  retención.
-                </p>
-
-                <div className="flex flex-col md:flex-row gap-4 items-center">
-                  <label className="flex flex-col gap-1 w-full md:w-80">
-                    Plan de grabación
-                    <select
-                      value={selectedRecordingId}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        if (value === "local") {
-                          setSelectedRecordingId("local");
-                        } else {
-                          setSelectedRecordingId(Number(value));
-                        }
-                      }}
-                      className="border rounded px-2 py-1"
-                    >
-                      <option value="local">
-                        Grabación local – U$ {LOCAL_RECORDING_PRICE.toFixed(2)}{" "}
-                        / cámara
-                      </option>
-                      {recordingOptions.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.modalidad} – U$ {r.precio_usd.toFixed(2)} / cámara
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  {selectedRecordingInfo && (
-                    <div className="text-sm text-neutral-700">
-                      <p>
-                        <strong>Plan elegido:</strong>{" "}
-                        {selectedRecordingInfo.modalidad}
-                      </p>
-                      <p>
-                        Mensual por cámara:{" "}
-                        <strong>
-                          U$ {selectedRecordingInfo.precio_usd.toFixed(2)}
-                        </strong>
-                        <div className="text-[0.7rem] text-neutral-500">
-                          ≈ ${" "}
-                          {usdToCop(
-                            selectedRecordingInfo.precio_usd,
-                            exchangeRateCopPerUsd
-                          ).toFixed(0)}{" "}
-                          COP
+    return (
+        <main className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+            {/* HEADER */}
+            <header className="bg-white border-b px-6 py-4 mb-6 no-print shadow-sm">
+                <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+                    <div className="flex items-center gap-3">
+                        <div className="relative w-10 h-10">
+                            <Image
+                                src="/logo-empresa.png"
+                                alt="Logo"
+                                fill
+                                className="object-contain rounded-md"
+                                onError={(e) => {
+                                    e.currentTarget.style.display = "none";
+                                }}
+                            />
+                            <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold absolute top-0 left-0 -z-10">
+                                IA
+                            </div>
                         </div>
-                      </p>
-                      <p>
-                        Diario por cámara:{" "}
-                        <strong>
-                          U${" "}
-                          {computeDaily(
-                            selectedRecordingInfo.precio_usd
-                          ).toFixed(2)}
-                        </strong>
-                      </p>
-                      <p>
-                        Semanal por cámara:{" "}
-                        <strong>
-                          U${" "}
-                          {computeWeekly(
-                            selectedRecordingInfo.precio_usd
-                          ).toFixed(2)}
-                        </strong>
-                      </p>
+                        <div>
+                            <h1 className="text-xl font-bold text-slate-800">
+                                Cotizador de Soluciones IA
+                            </h1>
+                            <p className="text-xs text-slate-500">
+                                Propios (precios.xlsx) vs Terceros (precios_software_seguridad_nube.xlsx)
+                            </p>
+                        </div>
                     </div>
-                  )}
-                </div>
-              </div>
 
-              {/* Totales simulador general */}
-              <div className="bg-white border rounded-xl p-4 md:p-6 space-y-4">
-                <h2 className="text-xl font-semibold">
-                  Resumen de la simulación
-                </h2>
-
-                {selectedAnalyticServices.length === 0 &&
-                  !selectedRecordingInfo && (
-                    <p className="text-sm text-neutral-600">
-                      Aún no has seleccionado ningún servicio. Marca al menos
-                      uno en la tabla y un plan de grabación.
-                    </p>
-                  )}
-
-                {(selectedAnalyticServices.length > 0 ||
-                  selectedRecordingInfo) && (
-                    <div className="grid md:grid-cols-2 gap-4 text-sm">
-                      <div className="space-y-2">
-                        <h3 className="font-semibold">Por cámara</h3>
-                        <p>
-                          Diario:{" "}
-                          <strong>U$ {dailyPerCameraUsd.toFixed(2)}</strong>
-                          <div className="text-[0.7rem] text-neutral-500">
-                            ≈ ${" "}
-                            {usdToCop(
-                              dailyPerCameraUsd,
-                              exchangeRateCopPerUsd
-                            ).toFixed(0)}{" "}
-                            COP
-                          </div>
-                        </p>
-                        <p>
-                          Semanal:{" "}
-                          <strong>U$ {weeklyPerCameraUsd.toFixed(2)}</strong>
-                          <div className="text-[0.7rem] text-neutral-500">
-                            ≈ ${" "}
-                            {usdToCop(
-                              weeklyPerCameraUsd,
-                              exchangeRateCopPerUsd
-                            ).toFixed(0)}{" "}
-                            COP
-                          </div>
-                        </p>
-                        <p>
-                          Mensual:{" "}
-                          <strong>U$ {monthlyPerCameraUsd.toFixed(2)}</strong>
-                          <div className="text-[0.7rem] text-neutral-500">
-                            ≈ ${" "}
-                            {usdToCop(
-                              monthlyPerCameraUsd,
-                              exchangeRateCopPerUsd
-                            ).toFixed(0)}{" "}
-                            COP
-                          </div>
-                        </p>
-                      </div>
-                      <div className="space-y-2">
-                        <h3 className="font-semibold">
-                          Total para {numCamaras} cámaras
-                        </h3>
-                        <p>
-                          Diario total:{" "}
-                          <strong>U$ {dailyTotalUsd.toFixed(2)}</strong>
-                          <div className="text-[0.7rem] text-neutral-500">
-                            ≈ ${" "}
-                            {usdToCop(
-                              dailyTotalUsd,
-                              exchangeRateCopPerUsd
-                            ).toFixed(0)}{" "}
-                            COP
-                          </div>
-                        </p>
-                        <p>
-                          Semanal total:{" "}
-                          <strong>U$ {weeklyTotalUsd.toFixed(2)}</strong>
-                          <div className="text-[0.7rem] text-neutral-500">
-                            ≈ ${" "}
-                            {usdToCop(
-                              weeklyTotalUsd,
-                              exchangeRateCopPerUsd
-                            ).toFixed(0)}{" "}
-                            COP
-                          </div>
-                        </p>
-                        <p>
-                          Mensual total:{" "}
-                          <strong>U$ {monthlyTotalUsd.toFixed(2)}</strong>
-                          <div className="text-[0.7rem] text-neutral-500">
-                            ≈ ${" "}
-                            {usdToCop(
-                              monthlyTotalUsd,
-                              exchangeRateCopPerUsd
-                            ).toFixed(0)}{" "}
-                            COP
-                          </div>
-                        </p>
-                      </div>
+                    <div className="flex gap-4 text-sm">
+                        <div className="flex flex-col items-end">
+                            <span className="text-slate-500 text-xs">TRM (COP/USD)</span>
+                            <input
+                                type="number"
+                                value={exchangeRate}
+                                onChange={(e) => setExchangeRate(Number(e.target.value))}
+                                className="border rounded px-2 py-1 w-24 text-right font-mono"
+                            />
+                        </div>
+                        <div className="flex flex-col items-end">
+                            <span className="text-slate-500 text-xs">Margen Global (%)</span>
+                            <input
+                                type="number"
+                                value={globalMarginPercent}
+                                onChange={(e) => setGlobalMarginPercent(Number(e.target.value))}
+                                className="border rounded px-2 py-1 w-20 text-right font-mono bg-blue-50 border-blue-200 text-blue-700 font-bold"
+                            />
+                        </div>
                     </div>
-                  )}
-              </div>
-            </section>
-          )}
+                </div>
+            </header>
 
-          {/* TAB: INFO */}
-          {activeTab === "info" && (
-            <section className="bg-white border rounded-xl p-4 md:p-6 space-y-4">
-              <h2 className="text-xl font-semibold">Info & diagramas</h2>
-              <p className="text-sm text-neutral-600">
-                Esta sección resume el costo “oculto” de mantener un modelo
-                propio de visión (por ejemplo, un YOLOv8 entrenado a medida)
-                frente a usar un servicio de analítica ya gestionado por el
-                proveedor. La idea es que el simulador muestre el costo del
-                servicio, mientras que este diagrama recuerda cuánto costaría
-                hacerlo todo en casa.
-              </p>
-
-              <div className="grid md:grid-cols-2 gap-4">
-                {/* Columna izquierda: diagrama */}
-                <div className="space-y-2">
-                  <h3 className="font-semibold">
-                    Diagrama: modelo propio (YOLOv8)
-                  </h3>
-                  <p className="text-xs text-neutral-600">
-                    El diagrama representa un flujo típico cuando gestionas tu
-                    propio modelo de detección (por ejemplo, YOLOv8) para placa,
-                    facial, humo u otros objetos. Cada bloque implica un costo:
-                    entrenamiento, infraestructura de GPUs, almacenamiento y
-                    mantenimiento continuo.
-                  </p>
-                  <div className="relative w-full h-48 md:h-64">
-                    <Image
-                      src="/diagrama-ia.png"
-                      alt="Diagrama de arquitectura con modelo YOLOv8 propio"
-                      fill
-                      className="object-contain rounded-lg border bg-neutral-50"
-                    />
-                  </div>
+            <div className="max-w-7xl mx-auto px-6 pb-12">
+                {/* TABS */}
+                <div className="flex gap-6 border-b mb-6 no-print">
+                    <button
+                        onClick={() => setActiveTab("propios")}
+                        className={`pb-3 text-sm font-medium border-b-2 transition-colors ${activeTab === "propios"
+                                ? "border-blue-600 text-blue-600"
+                                : "border-transparent text-slate-500"
+                            }`}
+                    >
+                        Nuestros Precios (Propios)
+                    </button>
+                    <button
+                        onClick={() => setActiveTab("terceros")}
+                        className={`pb-3 text-sm font-medium border-b-2 transition-colors ${activeTab === "terceros"
+                                ? "border-blue-600 text-blue-600"
+                                : "border-transparent text-slate-500"
+                            }`}
+                    >
+                        Factura Terceros
+                    </button>
+                    <button
+                        onClick={() => setActiveTab("info")}
+                        className={`pb-3 text-sm font-medium border-b-2 transition-colors ${activeTab === "info"
+                                ? "border-blue-600 text-blue-600"
+                                : "border-transparent text-slate-500"
+                            }`}
+                    >
+                        Detalle Técnico
+                    </button>
                 </div>
 
-                {/* Columna derecha: explicación de costes */}
-                <div className="space-y-2">
-                  <h3 className="font-semibold">
-                    “Costo YOLO” vs servicio gestionado
-                  </h3>
-                  <p className="text-sm text-neutral-600">
-                    A grandes rasgos, cuando decides entrenar y operar tu propio
-                    modelo (un YOLOv8 personalizado, por ejemplo), hay dos
-                    caminos:
-                  </p>
-                  <ul className="text-sm list-disc list-inside text-neutral-600 space-y-1">
-                    <li>
-                      <strong>Un solo modelo multi–clase:</strong> un YOLO
-                      entrenado para detectar placa, personas, EPI, fuego/humo,
-                      etc. Simplifica la arquitectura, pero exige más cuidado en
-                      el dataset y re–entrenos constantes.
-                    </li>
-                    <li>
-                      <strong>Varios modelos especializados:</strong> uno para
-                      humo/fuego, otro para facial, otro para objetos/EPI, etc.
-                      Ganas precisión en tareas concretas, pero multiplicas el
-                      coste de cómputo y de mantenimiento.
-                    </li>
-                  </ul>
-                  <p className="text-sm text-neutral-600">
-                    En ambos casos hay un “costo YOLO” aproximado que
-                    normalmente no se ve en una tabla de precios:
-                  </p>
-                  <ul className="text-sm list-disc list-inside text-neutral-600 space-y-1">
-                    <li>
-                      <strong>Entrenamiento y re–entrenos:</strong> horas de GPU
-                      para ajustar el modelo a nuevos escenarios, cámaras o
-                      ángulos. Aunque no se ejecute a diario, es un coste que
-                      reaparece cada cierto tiempo.
-                    </li>
-                    <li>
-                      <strong>Infraestructura de inferencia:</strong> servidores
-                      (a veces con GPU) procesando vídeo en tiempo real. Incluso
-                      un nodo modesto puede representar cientos de dólares al
-                      mes cuando se considera 24/7, ancho de banda y
-                      almacenamiento.
-                    </li>
-                    <li>
-                      <strong>Operación y soporte:</strong> monitorizar el
-                      modelo, actualizar librerías, resolver falsos
-                      positivos/negativos y adaptar el sistema cuando cambian
-                      cámaras, firmware o escenarios.
-                    </li>
-                  </ul>
-                  <p className="text-sm text-neutral-600">
-                    La idea de este apartado es que el cliente vea que los
-                    precios del simulador ya incluyen, de forma implícita, todo
-                    ese esfuerzo técnico: entrenar modelos, pagar el cómputo y
-                    mantener la arquitectura viva, en lugar de asumir ese costo
-                    de forma interna.
-                  </p>
-                </div>
-              </div>
-            </section>
-          )}
-        </div>
-      </main>
+                {/* --- TAB: PROPIOS --- */}
+                {activeTab === "propios" && (
+                    <div className="space-y-8">
+                        {/* Tabla de Edición Propios */}
+                        <div className="bg-white rounded-xl border shadow-sm overflow-hidden no-print">
+                            <div className="p-4 border-b bg-slate-50 flex justify-between items-center">
+                                <h2 className="font-semibold text-slate-700">
+                                    Configuración de Cámaras (Propios)
+                                </h2>
+                                <button
+                                    onClick={addCartItemPropios}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+                                >
+                                    + Agregar Cámara
+                                </button>
+                            </div>
 
-      {/* Vista solo para PDF: factura compacta */}
-      <PrintQuoteClient
-        cartItems={cartItems}
-        analyticServices={analyticServices}
-        recordingOptions={recordingOptions}
-        globalMarginPercent={globalMarginPercent}
-        exchangeRateCopPerUsd={exchangeRateCopPerUsd}
-        className="print-only"
-      />
-    </>
-  );
-}
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm text-left">
+                                    <thead className="bg-slate-100 text-slate-600 font-semibold border-b">
+                                        <tr>
+                                            <th className="px-4 py-3 w-24">ID</th>
+                                            <th className="px-4 py-3 w-48">Ubicación / Nombre</th>
+                                            <th className="px-4 py-3 w-20 text-center">Cant.</th>
+                                            <th className="px-4 py-3">Soluciones Activadas</th>
+                                            <th className="px-4 py-3 text-right w-40">Costo Base (USD)</th>
+                                            <th className="px-4 py-3 w-16 text-center"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y">
+                                        {cartCalcPropios.rows.map((row, idx) => (
+                                            <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                                <td className="px-4 py-3 align-top">
+                                                    <input
+                                                        className="w-full border rounded px-2 py-1 text-xs"
+                                                        value={row.id}
+                                                        onChange={(e) =>
+                                                            updateCartItemFieldPropios(idx, "id", e.target.value)
+                                                        }
+                                                    />
+                                                </td>
+                                                <td className="px-4 py-3 align-top">
+                                                    <input
+                                                        className="w-full border rounded px-2 py-1 text-xs"
+                                                        placeholder="Ej. Entrada Norte"
+                                                        value={row.nombre}
+                                                        onChange={(e) =>
+                                                            updateCartItemFieldPropios(idx, "nombre", e.target.value)
+                                                        }
+                                                    />
+                                                </td>
+                                                <td className="px-4 py-3 align-top">
+                                                    <input
+                                                        type="number"
+                                                        min={1}
+                                                        className="w-full border rounded px-2 py-1 text-center text-xs"
+                                                        value={row.cantidad}
+                                                        onChange={(e) =>
+                                                            updateCartItemFieldPropios(idx, "cantidad", Number(e.target.value))
+                                                        }
+                                                    />
+                                                </td>
+                                                <td className="px-4 py-3 align-top">
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                                        {solutionsData.map((sol) => {
+                                                            const isActive = row.selectedSolutionIds.includes(sol.id);
+                                                            const cost = sol.components.reduce((a, b) => a + b.costUsd, 0);
+                                                            return (
+                                                                <button
+                                                                    key={sol.id}
+                                                                    onClick={() => toggleSolutionPropios(idx, sol.id)}
+                                                                    className={`text-left text-xs px-2 py-1.5 rounded border transition-all ${isActive
+                                                                            ? "bg-blue-50 border-blue-400 text-blue-700 shadow-sm"
+                                                                            : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
+                                                                        }`}
+                                                                >
+                                                                    <div className="font-medium truncate" title={sol.name}>
+                                                                        {sol.name}
+                                                                    </div>
+                                                                    <div className="text-[10px] opacity-80">
+                                                                        [{sol.etiqueta}] + ${cost.toFixed(2)} USD
+                                                                    </div>
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-3 align-top text-right font-mono text-slate-600">
+                                                    ${row.rowTotalBaseUsd.toFixed(2)}
+                                                </td>
+                                                <td className="px-4 py-3 align-top text-center">
+                                                    <button
+                                                        onClick={() => removeCartItemPropios(idx)}
+                                                        className="text-red-400 hover:text-red-600"
+                                                        title="Eliminar fila"
+                                                    >
+                                                        ✕
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                    <tfoot className="bg-slate-50 font-semibold text-slate-700 border-t">
+                                        <tr>
+                                            <td colSpan={4} className="px-4 py-3 text-right">
+                                                Total Costo Base (Sin Margen):
+                                            </td>
+                                            <td className="px-4 py-3 text-right font-mono">
+                                                ${cartCalcPropios.totalMonthlyBaseUsd.toFixed(2)}
+                                            </td>
+                                            <td></td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                        </div>
 
-type TabButtonProps = {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-};
+                        {/* Resumen Comercial Propios */}
+                        <div className="grid md:grid-cols-2 gap-8">
+                            <div className="bg-white rounded-xl border p-6 shadow-sm space-y-4">
+                                <h3 className="font-bold text-lg text-slate-800 border-b pb-2">
+                                    Resumen Comercial (Mensual)
+                                </h3>
 
-function TabButton({ label, active, onClick }: TabButtonProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`px-3 py-1 text-sm rounded-t-lg border-b-2 ${active
-          ? "border-black text-black font-semibold"
-          : "border-transparent text-neutral-500 hover:text-neutral-800"
-        }`}
-    >
-      {label}
-    </button>
-  );
-}
+                                <div className="flex justify-between items-center text-sm">
+                                    <span className="text-slate-500">Costo Operativo Base (USD)</span>
+                                    <span className="font-mono">
+                                        ${cartCalcPropios.totalMonthlyBaseUsd.toFixed(2)}
+                                    </span>
+                                </div>
+                                <div className="flex justify-between items-center text-sm">
+                                    <span className="text-slate-500">
+                                        Margen Aplicado ({globalMarginPercent}%)
+                                    </span>
+                                    <span className="font-mono text-green-600">
+                                        +$
+                                        {(
+                                            cartCalcPropios.totalMonthlySaleUsd -
+                                            cartCalcPropios.totalMonthlyBaseUsd
+                                        ).toFixed(2)}
+                                    </span>
+                                </div>
+                                <div className="border-t pt-3 flex justify-between items-center text-lg font-bold">
+                                    <span>Total Venta (USD)</span>
+                                    <span>${cartCalcPropios.totalMonthlySaleUsd.toFixed(2)}</span>
+                                </div>
 
-type PrintQuoteProps = {
-  cartItems: CameraCartItem[];
-  analyticServices: PriceRow[];
-  recordingOptions: PriceRow[];
-  globalMarginPercent: number;
-  exchangeRateCopPerUsd: number;
-  className?: string;
-};
+                                <div className="bg-slate-100 rounded-lg p-3 mt-4">
+                                    <div className="text-xs text-slate-500 mb-1 uppercase tracking-wide font-semibold">
+                                        Estimado en COP
+                                    </div>
+                                    <div className="text-2xl font-bold text-slate-800">
+                                        ${" "}
+                                        {usdToCop(
+                                            cartCalcPropios.totalMonthlySaleUsd,
+                                            exchangeRate
+                                        ).toLocaleString("es-CO")}
+                                    </div>
+                                    <div className="text-xs text-slate-400 text-right mt-1">
+                                        Tasa: {exchangeRate}
+                                    </div>
+                                </div>
 
-function PrintQuote({
-  cartItems,
-  analyticServices,
-  recordingOptions,
-  globalMarginPercent,
-  exchangeRateCopPerUsd,
-  className = "",
-}: PrintQuoteProps) {
-  if (cartItems.length === 0) return null;
+                                <button
+                                    onClick={handlePrint}
+                                    className="w-full mt-4 bg-slate-900 text-white py-2 rounded-lg hover:bg-black transition-colors"
+                                >
+                                    Imprimir Cotización PDF
+                                </button>
+                            </div>
 
-  const factor = 1 + (globalMarginPercent || 0) / 100;
+                            <div className="text-sm text-slate-600 space-y-3 p-4 bg-blue-50 rounded-xl border border-blue-100">
+                                <h4 className="font-bold text-blue-800">¿Cómo se calcula el precio?</h4>
+                                <p>
+                                    Este modelo suma todos los componentes reales necesarios para operar la IA propia:
+                                </p>
+                                <ul className="list-disc pl-4 space-y-1">
+                                    <li><strong>GPU:</strong> Costo de inferencia local.</li>
+                                    <li><strong>Storage/Cloud:</strong> Almacenamiento y servicios nube.</li>
+                                    <li><strong>Base de Datos:</strong> Persistencia de metadatos.</li>
+                                    <li><strong>Licencia/Soporte:</strong> Gestión del ciclo de vida.</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
-  const rows = cartItems.map((item, index) => {
-    const analyticSelected = analyticServices.filter((s) =>
-      item.selectedServiceIds.includes(s.id)
+                {/* --- TAB: TERCEROS --- */}
+                {activeTab === "terceros" && (
+                    <section className="space-y-6">
+                        <div className="bg-white border rounded-xl p-4 md:p-6 space-y-3">
+                            <h2 className="text-xl font-semibold">Factura / propuesta por cámara (Terceros)</h2>
+                            <p className="text-sm text-neutral-600">
+                                Cada fila representa una cámara (o grupo de cámaras). Las columnas centrales son los servicios; si el checkbox está seleccionado, aparece el precio mensual por ese grupo.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={addCartItemTerceros}
+                                className="inline-flex items-center justify-center rounded-md border px-3 py-1.5 text-sm font-medium bg-black text-white hover:bg-neutral-800"
+                            >
+                                + Agregar fila
+                            </button>
+                        </div>
+
+                        {cartItemsTerceros.length === 0 ? (
+                            <p className="text-sm text-neutral-500">
+                                No hay filas en la propuesta. Haz clic en{" "}
+                                <strong>"Agregar fila"</strong> para comenzar.
+                            </p>
+                        ) : (
+                            <>
+                                <div className="bg-white border rounded-xl p-4 md:p-6 space-y-4">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <h3 className="text-lg font-semibold">Detalle de cámaras</h3>
+                                        <p className="text-xs text-neutral-500">
+                                            Los campos son editables directamente en la tabla.
+                                        </p>
+                                    </div>
+
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-xs md:text-sm border-collapse">
+                                            <thead>
+                                                <tr className="border-b bg-neutral-50">
+                                                    <th className="p-2 text-left">ID</th>
+                                                    <th className="p-2 text-left">Descripción</th>
+                                                    <th className="p-2 text-right">Cant.</th>
+                                                    <th className="p-2 text-left">Grabación</th>
+                                                    {analyticServices.map((s) => (
+                                                        <th key={s.id} className="p-2 text-center">
+                                                            {s.categoria}
+                                                        </th>
+                                                    ))}
+                                                    <th className="p-2 text-right">Subtotal mensual (COP$)</th>
+                                                    <th className="p-2 text-center">Acciones</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {cartItemsTerceros.map((item, rowIndex) => {
+                                                    const c = computeCartItemCostsTerceros(item);
+                                                    const monthlyTotalBaseCop = usdToCop(c.monthlyTotalBaseUsd, exchangeRate);
+
+                                                    return (
+                                                        <tr
+                                                            key={rowIndex}
+                                                            className="border-b last:border-0 hover:bg-neutral-50"
+                                                        >
+                                                            <td className="p-2 align-middle">
+                                                                <input
+                                                                    type="text"
+                                                                    value={item.id}
+                                                                    onChange={(e) =>
+                                                                        updateCartItemFieldTerceros(rowIndex, "id", e.target.value)
+                                                                    }
+                                                                    className="w-20 border rounded px-1 py-0.5 text-xs"
+                                                                />
+                                                            </td>
+                                                            <td className="p-2 align-middle">
+                                                                <input
+                                                                    type="text"
+                                                                    placeholder="Portería, Bodega, etc."
+                                                                    value={item.nombre}
+                                                                    onChange={(e) =>
+                                                                        updateCartItemFieldTerceros(rowIndex, "nombre", e.target.value)
+                                                                    }
+                                                                    className="w-40 md:w-56 border rounded px-1 py-0.5 text-xs"
+                                                                />
+                                                            </td>
+                                                            <td className="p-2 align-middle text-right">
+                                                                <input
+                                                                    type="number"
+                                                                    min={0}
+                                                                    value={item.cantidad}
+                                                                    onChange={(e) => {
+                                                                        const n = Number(e.target.value);
+                                                                        if (!Number.isNaN(n) && n >= 0) {
+                                                                            updateCartItemFieldTerceros(rowIndex, "cantidad", n);
+                                                                        }
+                                                                    }}
+                                                                    className="w-16 border rounded px-1 py-0.5 text-xs text-right"
+                                                                />
+                                                            </td>
+                                                            <td className="p-2 align-middle">
+                                                                <select
+                                                                    value={item.selectedRecording}
+                                                                    onChange={(e) => {
+                                                                        const value = e.target.value;
+                                                                        if (value === "local") {
+                                                                            updateCartItemFieldTerceros(rowIndex, "selectedRecording", "local");
+                                                                        } else {
+                                                                            updateCartItemFieldTerceros(rowIndex, "selectedRecording", Number(value));
+                                                                        }
+                                                                    }}
+                                                                    className="border rounded px-1 py-0.5 text-xs"
+                                                                >
+                                                                    <option value="local">
+                                                                        Local – U$ {LOCAL_RECORDING_PRICE.toFixed(2)}/cam
+                                                                    </option>
+                                                                    {recordingOptions.map((r) => (
+                                                                        <option key={r.id} value={r.id}>
+                                                                            {r.modalidad} – U$ {r.precio_usd.toFixed(2)}/cam
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
+                                                            </td>
+                                                            {analyticServices.map((s) => {
+                                                                const included = item.selectedServiceIds.includes(s.id);
+                                                                const monthlyRowPriceCop = usdToCop(
+                                                                    s.precio_usd * item.cantidad,
+                                                                    exchangeRate
+                                                                );
+                                                                return (
+                                                                    <td key={s.id} className="p-2 align-middle text-center">
+                                                                        <label className="inline-flex flex-col items-center gap-1">
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked={included}
+                                                                                onChange={() => toggleCartItemService(rowIndex, s.id)}
+                                                                            />
+                                                                            {included && (
+                                                                                <span className="text-[0.65rem] md:text-xs text-neutral-700">
+                                                                                    ≈ $ {monthlyRowPriceCop.toFixed(0)} COP
+                                                                                </span>
+                                                                            )}
+                                                                        </label>
+                                                                    </td>
+                                                                );
+                                                            })}
+                                                            <td className="p-2 align-middle text-right font-semibold">
+                                                                ${monthlyTotalBaseCop.toFixed(0)} COP
+                                                            </td>
+                                                            <td className="p-2 align-middle text-center">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => removeCartItemTerceros(rowIndex)}
+                                                                    className="text-xs text-red-500 hover:underline"
+                                                                >
+                                                                    Borrar
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                {/* Resumen global Terceros */}
+                                <div className="bg-white border rounded-xl p-4 md:p-6 space-y-4">
+                                    <h2 className="text-xl font-semibold">Resumen global de la propuesta</h2>
+
+                                    <div className="grid md:grid-cols-2 gap-4 text-sm mt-2">
+                                        <div className="space-y-1">
+                                            <h3 className="font-semibold">Costo base</h3>
+                                            <p>
+                                                Diario total:{" "}
+                                                <strong>U$ {cartTotalsTerceros.dailyCost.toFixed(2)}</strong>
+                                                <div className="text-[0.7rem] text-neutral-500">
+                                                    ≈ $ {usdToCop(cartTotalsTerceros.dailyCost, exchangeRate).toFixed(0)} COP
+                                                </div>
+                                            </p>
+                                            <p>
+                                                Semanal total:{" "}
+                                                <strong>U$ {cartTotalsTerceros.weeklyCost.toFixed(2)}</strong>
+                                                <div className="text-[0.7rem] text-neutral-500">
+                                                    ≈ $ {usdToCop(cartTotalsTerceros.weeklyCost, exchangeRate).toFixed(0)} COP
+                                                </div>
+                                            </p>
+                                            <p>
+                                                Mensual total:{" "}
+                                                <strong>U$ {cartTotalsTerceros.monthlyCost.toFixed(2)}</strong>
+                                                <div className="text-[0.7rem] text-neutral-500">
+                                                    ≈ $ {usdToCop(cartTotalsTerceros.monthlyCost, exchangeRate).toFixed(0)} COP
+                                                </div>
+                                            </p>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <h3 className="font-semibold">
+                                                Precio de venta ({globalMarginPercent}% margen)
+                                            </h3>
+                                            <p>
+                                                Diario total:{" "}
+                                                <strong>U$ {saleTotalsTerceros.dailySale.toFixed(2)}</strong>
+                                                <div className="text-[0.7rem] text-neutral-500">
+                                                    ≈ $ {usdToCop(saleTotalsTerceros.dailySale, exchangeRate).toFixed(0)} COP
+                                                </div>
+                                            </p>
+                                            <p>
+                                                Semanal total:{" "}
+                                                <strong>U$ {saleTotalsTerceros.weeklySale.toFixed(2)}</strong>
+                                                <div className="text-[0.7rem] text-neutral-500">
+                                                    ≈ $ {usdToCop(saleTotalsTerceros.weeklySale, exchangeRate).toFixed(0)} COP
+                                                </div>
+                                            </p>
+                                            <p>
+                                                Mensual total:{" "}
+                                                <strong>U$ {saleTotalsTerceros.monthlySale.toFixed(2)}</strong>
+                                                <div className="text-[0.7rem] text-neutral-500">
+                                                    ≈ $ {usdToCop(saleTotalsTerceros.monthlySale, exchangeRate).toFixed(0)} COP
+                                                </div>
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={handlePrint}
+                                        className="inline-flex items-center justify-center rounded-md border px-3 py-1.5 text-sm font-medium bg-black text-white hover:bg-neutral-800"
+                                    >
+                                        Generar PDF / Imprimir propuesta
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </section>
+                )}
+
+                {/* --- TAB: INFO --- */}
+                {activeTab === "info" && (
+                    <div className="space-y-6">
+                        <div className="bg-white rounded-xl border p-6 shadow-sm">
+                            <h2 className="text-lg font-bold text-slate-800 mb-4">
+                                Desglose de Costos por Solución (Propios)
+                            </h2>
+                            <p className="text-sm text-slate-600 mb-6">
+                                Aquí se detalla la "sumatoria total" interna de cada modelo. El precio final es la suma de estos componentes más el margen configurado.
+                            </p>
+
+                            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                                {solutionsData.map((sol) => {
+                                    const totalBase = sol.components.reduce((a, b) => a + b.costUsd, 0);
+                                    return (
+                                        <div key={sol.id} className="border rounded-lg overflow-hidden flex flex-col">
+                                            <div className="bg-slate-50 p-3 border-b">
+                                                <h3 className="font-bold text-slate-700 text-sm">{sol.name}</h3>
+                                                <div className="text-xs text-slate-500 mt-1">
+                                                    Costo Base:{" "}
+                                                    <span className="font-mono font-bold text-slate-900">
+                                                        ${totalBase.toFixed(2)} USD
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <div className="p-3 flex-1">
+                                                <table className="w-full text-xs">
+                                                    <tbody>
+                                                        {sol.components.map((comp, i) => (
+                                                            <tr
+                                                                key={i}
+                                                                className="border-b last:border-0 border-dashed border-slate-100"
+                                                            >
+                                                                <td className="py-1 pr-2 text-slate-600">{comp.concept}</td>
+                                                                <td className="py-1 text-right font-mono text-slate-500">
+                                                                    ${comp.costUsd.toFixed(2)}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            <div className="bg-blue-50 p-2 text-xs border-t border-blue-100 flex justify-between items-center">
+                                                <span className="text-blue-800 font-medium">Etiqueta:</span>
+                                                <span className="bg-white px-2 py-0.5 rounded border border-blue-200 text-blue-600">
+                                                    {sol.etiqueta}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </main>
     );
-    const recordingInfo = getRecordingInfo(
-      item.selectedRecording,
-      recordingOptions
-    );
-
-    const monthlyPerCameraBaseUsd =
-      analyticSelected.reduce((acc, s) => acc + s.precio_usd, 0) +
-      (recordingInfo?.precio_usd ?? 0);
-
-    const monthlyTotalBaseUsd = monthlyPerCameraBaseUsd * item.cantidad;
-    const monthlyTotalSaleUsd = monthlyTotalBaseUsd * factor;
-
-    return {
-      index: index + 1,
-      item,
-      analyticSelected,
-      recordingInfo,
-      monthlyTotalBaseUsd,
-      monthlyTotalSaleUsd,
-    };
-  });
-
-  const monthlyCostTotalUsd = rows.reduce(
-    (acc, r) => acc + r.monthlyTotalBaseUsd,
-    0
-  );
-  const monthlySaleTotalUsd = rows.reduce(
-    (acc, r) => acc + r.monthlyTotalSaleUsd,
-    0
-  );
-
-  const monthlyCostTotalCop = usdToCop(
-    monthlyCostTotalUsd,
-    exchangeRateCopPerUsd
-  );
-  const monthlySaleTotalCop = usdToCop(
-    monthlySaleTotalUsd,
-    exchangeRateCopPerUsd
-  );
-
-  return (
-    <div className={className}>
-      <div className="p-8 text-sm text-neutral-900">
-        {/* Encabezado de la cotización */}
-        <header className="flex justify-between items-start mb-6">
-          <div>
-            <h1 className="text-xl font-bold mb-1">
-              Propuesta económica – Cámaras + IA
-            </h1>
-            <p className="text-xs text-neutral-600">
-              Detalle de servicios de analítica y grabación por cámara/grupo.
-            </p>
-          </div>
-          <div className="text-xs text-right">
-            <p>Fecha: {new Date().toLocaleDateString("es-CO")}</p>
-            <p>Margen sobre total: {globalMarginPercent.toFixed(1)}%</p>
-            <p>Tasa usada: {exchangeRateCopPerUsd.toFixed(0)} COP/USD</p>
-          </div>
-        </header>
-
-        {/* Tabla compacta */}
-        <table className="w-full border-collapse text-xs mb-4">
-          <thead>
-            <tr>
-              <th className="border p-1 text-left w-8">#</th>
-              <th className="border p-1 text-left">ID</th>
-              <th className="border p-1 text-left">Descripción</th>
-              <th className="border p-1 text-right">Cant.</th>
-              <th className="border p-1 text-left">Grabación</th>
-              <th className="border p-1 text-left">Servicios de analítica</th>
-              <th className="border p-1 text-right">Subtotal mensual (COP$)</th>
-              <th className="border p-1 text-right">
-                Subtotal con margen (COP$)
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const monthlyBaseCop = usdToCop(
-                row.monthlyTotalBaseUsd,
-                exchangeRateCopPerUsd
-              );
-              const monthlySaleCop = usdToCop(
-                row.monthlyTotalSaleUsd,
-                exchangeRateCopPerUsd
-              );
-              return (
-                <tr key={row.index}>
-                  <td className="border p-1 align-top">{row.index}</td>
-                  <td className="border p-1 align-top">{row.item.id}</td>
-                  <td className="border p-1 align-top">
-                    {row.item.nombre || "—"}
-                  </td>
-                  <td className="border p-1 align-top text-right">
-                    {row.item.cantidad}
-                  </td>
-                  <td className="border p-1 align-top">
-                    {row.recordingInfo?.modalidad || "No definido"}
-                  </td>
-                  <td className="border p-1 align-top">
-                    {row.analyticSelected.length === 0
-                      ? "Sin analítica"
-                      : row.analyticSelected.map((s) => s.categoria).join(", ")}
-                  </td>
-                  <td className="border p-1 align-top text-right">
-                    ${monthlyBaseCop.toFixed(0)} COP
-                  </td>
-                  <td className="border p-1 align-top text-right">
-                    ${monthlySaleCop.toFixed(0)} COP
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-
-        {/* Totales */}
-        <div className="flex justify-end mt-2">
-          <table className="text-xs">
-            <tbody>
-              <tr>
-                <td className="pr-4 pb-1 text-right font-semibold">
-                  Total mensual (costo base):
-                </td>
-                <td className="pb-1 text-right">
-                  U$ {monthlyCostTotalUsd.toFixed(2)}
-                  <div className="text-[0.7rem] text-neutral-500">
-                    ≈ ${monthlyCostTotalCop.toFixed(0)} COP
-                  </div>
-                </td>
-              </tr>
-              <tr>
-                <td className="pr-4 pb-1 text-right font-semibold">
-                  Total mensual (con margen):
-                </td>
-                <td className="pb-1 text-right">
-                  U$ {monthlySaleTotalUsd.toFixed(2)}
-                  <div className="text-[0.7rem] text-neutral-500">
-                    ≈ ${monthlySaleTotalCop.toFixed(0)} COP
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <p className="mt-6 text-xs text-neutral-600">
-          Nota: Los valores son mensuales e incluyen el margen global de{" "}
-          {globalMarginPercent.toFixed(1)}% sobre el costo total de la solución,
-          considerando analítica y grabación. Los montos en COP se calculan con
-          la tasa indicada y pueden ajustarse a la TRM vigente al momento de la
-          facturación.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-type PrintQuoteClientProps = PrintQuoteProps;
-
-function PrintQuoteClient({
-  cartItems,
-  analyticServices,
-  recordingOptions,
-  globalMarginPercent,
-  exchangeRateCopPerUsd,
-  className = "",
-}: PrintQuoteClientProps) {
-  if (cartItems.length === 0) return null;
-
-  const factor = 1 + (globalMarginPercent || 0) / 100;
-
-  const rows = cartItems.map((item, index) => {
-    const analyticSelected = analyticServices.filter((s) =>
-      item.selectedServiceIds.includes(s.id)
-    );
-    const recordingInfo = getRecordingInfo(
-      item.selectedRecording,
-      recordingOptions
-    );
-
-    const monthlyPerCameraBaseUsd =
-      analyticSelected.reduce((acc, s) => acc + s.precio_usd, 0) +
-      (recordingInfo?.precio_usd ?? 0);
-
-    const monthlyTotalBaseUsd = monthlyPerCameraBaseUsd * item.cantidad;
-    const monthlyTotalSaleUsd = monthlyTotalBaseUsd * factor;
-
-    return {
-      index: index + 1,
-      item,
-      analyticSelected,
-      recordingInfo,
-      monthlyTotalSaleUsd,
-    };
-  });
-
-  const monthlySaleTotalUsd = rows.reduce(
-    (acc, r) => acc + r.monthlyTotalSaleUsd,
-    0
-  );
-  const monthlySaleTotalCop = usdToCop(
-    monthlySaleTotalUsd,
-    exchangeRateCopPerUsd
-  );
-
-  return (
-    <div className={className}>
-      <div className="p-8 text-sm text-neutral-900">
-        {/* Encabezado de la cotización para cliente */}
-        <header className="flex justify-between items-start mb-6">
-          <div>
-            <h1 className="text-xl font-bold mb-1">
-              Propuesta económica – Cámaras + IA
-            </h1>
-            <p className="text-xs text-neutral-600">
-              Detalle de servicios de analítica y grabación por cámara/grupo.
-            </p>
-          </div>
-          <div className="text-xs text-right">
-            <p>Fecha: {new Date().toLocaleDateString("es-CO")}</p>
-            <p>
-              Tasa de referencia: {exchangeRateCopPerUsd.toFixed(0)} COP/USD
-            </p>
-          </div>
-        </header>
-
-        {/* Tabla compacta solo con valores finales en COP */}
-        <table className="w-full border-collapse text-xs mb-4">
-          <thead>
-            <tr>
-              <th className="border p-1 text-left w-8">#</th>
-              <th className="border p-1 text-left">ID</th>
-              <th className="border p-1 text-left">Descripción</th>
-              <th className="border p-1 text-right">Cant.</th>
-              <th className="border p-1 text-left">Grabación</th>
-              <th className="border p-1 text-left">Servicios de analítica</th>
-              <th className="border p-1 text-right">Valor mensual (COP$)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const monthlySaleCop = usdToCop(
-                row.monthlyTotalSaleUsd,
-                exchangeRateCopPerUsd
-              );
-              return (
-                <tr key={row.index}>
-                  <td className="border p-1 align-top">{row.index}</td>
-                  <td className="border p-1 align-top">{row.item.id}</td>
-                  <td className="border p-1 align-top">
-                    {row.item.nombre || "—"}
-                  </td>
-                  <td className="border p-1 align-top text-right">
-                    {row.item.cantidad}
-                  </td>
-                  <td className="border p-1 align-top">
-                    {row.recordingInfo?.modalidad || "No definido"}
-                  </td>
-                  <td className="border p-1 align-top">
-                    {row.analyticSelected.length === 0
-                      ? "Sin analítica"
-                      : row.analyticSelected.map((s) => s.categoria).join(", ")}
-                  </td>
-                  <td className="border p-1 align-top text-right">
-                    ${monthlySaleCop.toFixed(0)} COP
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-
-        {/* Total solo en COP, sin mencionar margen ni USD */}
-        <div className="flex justify-end mt-2">
-          <table className="text-xs">
-            <tbody>
-              <tr>
-                <td className="pr-4 pb-1 text-right font-semibold">
-                  Total mensual:
-                </td>
-                <td className="pb-1 text-right">
-                  ${monthlySaleTotalCop.toFixed(0)} COP
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <p className="mt-6 text-xs text-neutral-600">
-          Los valores están expresados en pesos colombianos (COP) y corresponden
-          al valor mensual estimado de la solución propuesta.
-        </p>
-      </div>
-    </div>
-  );
 }

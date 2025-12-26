@@ -2,6 +2,72 @@ import path from "path";
 import fs from "fs";
 import * as XLSX from "xlsx";
 
+// --- NUEVO SCHEMA (precios.xlsx) ---
+
+export type ComponentCost = {
+  concept: string;
+  costUsd: number;
+  description?: string;
+};
+
+export type SolutionDef = {
+  id: string;
+  name: string;
+  etiqueta: string;
+  components: ComponentCost[];
+};
+
+export function getPricesFromExcel(): SolutionDef[] {
+  const filePath = path.join(
+    process.cwd(),
+    "data",
+    "precios.xlsx"
+  );
+
+  const fileBuffer = fs.readFileSync(filePath);
+  const workbook = XLSX.read(fileBuffer, { type: "buffer" });
+  const sheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
+
+  const rows = XLSX.utils.sheet_to_json<any>(sheet);
+
+  // Group by "Solución / Categoría"
+  const groupedMap = new Map<string, SolutionDef>();
+
+  rows.forEach((row, index) => {
+    const rawName = row["Solución / Categoría"];
+    if (!rawName) return;
+
+    const name = String(rawName).trim();
+    const etiqueta = row["Etiqueta"] ? String(row["Etiqueta"]).trim() : "General";
+
+    // Generate a simple ID from the name
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+
+    const component: ComponentCost = {
+      concept: row["Concepto"] ? String(row["Concepto"]) : "Componente",
+      costUsd: row["Costo Real (USD)"] ? Number(row["Costo Real (USD)"]) : 0,
+      description: row["Descripción Técnica"] ? String(row["Descripción Técnica"]) : undefined
+    };
+
+    if (!groupedMap.has(name)) {
+      groupedMap.set(name, {
+        id,
+        name,
+        etiqueta,
+        components: []
+      });
+    }
+
+    const sol = groupedMap.get(name)!;
+    sol.components.push(component);
+  });
+
+  return Array.from(groupedMap.values());
+}
+
+// --- VIEJO SCHEMA (precios_software_seguridad_nube.xlsx) ---
+
 export type PriceRow = {
   id: number;
   categoria: string;
@@ -12,14 +78,13 @@ export type PriceRow = {
   fps?: string;
   precio_usd: number;
   notas?: string;
-  etiqueta?: string;
 };
 
-export function getPricesFromExcel(): PriceRow[] {
+export function getOldPricesFromExcel(): PriceRow[] {
   const filePath = path.join(
     process.cwd(),
     "data",
-    "precios.xlsx"
+    "precios_software_seguridad_nube.xlsx"
   );
 
   const fileBuffer = fs.readFileSync(filePath);
@@ -42,9 +107,9 @@ export function getPricesFromExcel(): PriceRow[] {
       : undefined,
     fps: row.fps ? String(row.fps) : undefined,
     precio_usd: Number(row.precio_usd ?? 0),
-    notas: row.notas ? String(row.notas) : undefined,
-    etiqueta: row.etiqueta ? String(row.etiqueta) : undefined,
+    notas: row.notas ? String(row.notas) : undefined
   }));
 
   return prices;
 }
+
