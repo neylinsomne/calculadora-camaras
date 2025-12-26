@@ -5,13 +5,15 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import type { PriceRow } from "@/lib/prices";
 
-type TabId = "simulador" | "info" | "carrito";
+type TabId = "nuestros_precios" | "simulador" | "info" | "carrito";
 
 // Precio de grabación local en USD
 const LOCAL_RECORDING_PRICE = 1.5; // 1.50 USD / cámara
 
 // Descripción corta por tab
 const TAB_DESCRIPTIONS: Record<TabId, string> = {
+  nuestros_precios:
+    "Lista oficial de precios (cámaras + analíticas).",
   simulador:
     "Vista general para estimar rápidamente el costo por cámara y por grupo.",
   carrito:
@@ -65,7 +67,7 @@ function getRecordingInfo(
 
 export default function HomePage() {
   const [prices, setPrices] = useState<PriceRow[]>([]);
-  const [activeTab, setActiveTab] = useState<TabId>("carrito");
+  const [activeTab, setActiveTab] = useState<TabId>("nuestros_precios");
 
   // Tasa de cambio editable (COP por 1 USD)
   const [exchangeRateCopPerUsd, setExchangeRateCopPerUsd] =
@@ -91,10 +93,10 @@ export default function HomePage() {
 
   // separar servicios de analítica vs grabación en la nube
   const analyticServices = prices.filter(
-    (p) => p.categoria !== "GRABACIÓN DE VIDEO EN LA NUBE"
+    (p) => p.categoria !== "GRABACIÓN VIDEO"
   );
   const recordingOptions = prices.filter(
-    (p) => p.categoria === "GRABACIÓN DE VIDEO EN LA NUBE"
+    (p) => p.categoria === "GRABACIÓN VIDEO"
   );
 
   // --- TAB 1: simulador general ---
@@ -303,6 +305,11 @@ export default function HomePage() {
           {/* Tabs */}
           <nav className="flex gap-2 border-b pb-2 overflow-x-auto">
             <TabButton
+              label="Nuestros Precios"
+              active={activeTab === "nuestros_precios"}
+              onClick={() => setActiveTab("nuestros_precios")}
+            />
+            <TabButton
               label="Factura por cámara"
               active={activeTab === "carrito"}
               onClick={() => setActiveTab("carrito")}
@@ -438,9 +445,8 @@ export default function HomePage() {
                                           e.target.value
                                         )
                                       }
-                                      className={`w-20 border rounded px-1 py-0.5 text-xs ${
-                                        isDuplicateId ? "border-red-400" : ""
-                                      }`}
+                                      className={`w-20 border rounded px-1 py-0.5 text-xs ${isDuplicateId ? "border-red-400" : ""
+                                        }`}
                                     />
                                     {isDuplicateId && (
                                       <span className="text-[0.65rem] text-red-500">
@@ -716,11 +722,10 @@ export default function HomePage() {
                       type="button"
                       onClick={handlePrintPdf}
                       disabled={hasDuplicateIds || cartItems.length === 0}
-                      className={`inline-flex items-center justify-center rounded-md border px-3 py-1.5 text-sm font-medium ${
-                        hasDuplicateIds || cartItems.length === 0
+                      className={`inline-flex items-center justify-center rounded-md border px-3 py-1.5 text-sm font-medium ${hasDuplicateIds || cartItems.length === 0
                           ? "bg-neutral-300 text-neutral-500 cursor-not-allowed"
                           : "bg-black text-white hover:bg-neutral-800"
-                      }`}
+                        }`}
                     >
                       Generar PDF / Imprimir propuesta
                     </button>
@@ -746,8 +751,8 @@ export default function HomePage() {
             </section>
           )}
 
-          {/* TAB 1: Simulador general */}
-          {activeTab === "simulador" && (
+          {/* TAB 1: Simulador general / Nuestros Precios */}
+          {(activeTab === "simulador" || activeTab === "nuestros_precios") && (
             <section className="space-y-6">
               {/* Número de cámaras */}
               <div className="bg-white border rounded-xl p-4 md:p-6 space-y-4">
@@ -795,6 +800,7 @@ export default function HomePage() {
                         <tr className="border-b bg-neutral-50">
                           <th className="text-left p-2">Incluir</th>
                           <th className="text-left p-2">Tipo de detección</th>
+                          <th className="text-left p-2">Etiqueta</th>
                           <th className="text-right p-2">
                             Mensual por cámara (U$)
                           </th>
@@ -834,6 +840,9 @@ export default function HomePage() {
                                 <div className="text-neutral-600">
                                   {s.servicio}
                                 </div>
+                              </td>
+                              <td className="p-2 align-middle text-sm text-neutral-600">
+                                {s.etiqueta}
                               </td>
                               <td className="p-2 text-right align-middle">
                                 U$ {monthly.toFixed(2)}
@@ -973,89 +982,89 @@ export default function HomePage() {
 
                 {(selectedAnalyticServices.length > 0 ||
                   selectedRecordingInfo) && (
-                  <div className="grid md:grid-cols-2 gap-4 text-sm">
-                    <div className="space-y-2">
-                      <h3 className="font-semibold">Por cámara</h3>
-                      <p>
-                        Diario:{" "}
-                        <strong>U$ {dailyPerCameraUsd.toFixed(2)}</strong>
-                        <div className="text-[0.7rem] text-neutral-500">
-                          ≈ ${" "}
-                          {usdToCop(
-                            dailyPerCameraUsd,
-                            exchangeRateCopPerUsd
-                          ).toFixed(0)}{" "}
-                          COP
-                        </div>
-                      </p>
-                      <p>
-                        Semanal:{" "}
-                        <strong>U$ {weeklyPerCameraUsd.toFixed(2)}</strong>
-                        <div className="text-[0.7rem] text-neutral-500">
-                          ≈ ${" "}
-                          {usdToCop(
-                            weeklyPerCameraUsd,
-                            exchangeRateCopPerUsd
-                          ).toFixed(0)}{" "}
-                          COP
-                        </div>
-                      </p>
-                      <p>
-                        Mensual:{" "}
-                        <strong>U$ {monthlyPerCameraUsd.toFixed(2)}</strong>
-                        <div className="text-[0.7rem] text-neutral-500">
-                          ≈ ${" "}
-                          {usdToCop(
-                            monthlyPerCameraUsd,
-                            exchangeRateCopPerUsd
-                          ).toFixed(0)}{" "}
-                          COP
-                        </div>
-                      </p>
+                    <div className="grid md:grid-cols-2 gap-4 text-sm">
+                      <div className="space-y-2">
+                        <h3 className="font-semibold">Por cámara</h3>
+                        <p>
+                          Diario:{" "}
+                          <strong>U$ {dailyPerCameraUsd.toFixed(2)}</strong>
+                          <div className="text-[0.7rem] text-neutral-500">
+                            ≈ ${" "}
+                            {usdToCop(
+                              dailyPerCameraUsd,
+                              exchangeRateCopPerUsd
+                            ).toFixed(0)}{" "}
+                            COP
+                          </div>
+                        </p>
+                        <p>
+                          Semanal:{" "}
+                          <strong>U$ {weeklyPerCameraUsd.toFixed(2)}</strong>
+                          <div className="text-[0.7rem] text-neutral-500">
+                            ≈ ${" "}
+                            {usdToCop(
+                              weeklyPerCameraUsd,
+                              exchangeRateCopPerUsd
+                            ).toFixed(0)}{" "}
+                            COP
+                          </div>
+                        </p>
+                        <p>
+                          Mensual:{" "}
+                          <strong>U$ {monthlyPerCameraUsd.toFixed(2)}</strong>
+                          <div className="text-[0.7rem] text-neutral-500">
+                            ≈ ${" "}
+                            {usdToCop(
+                              monthlyPerCameraUsd,
+                              exchangeRateCopPerUsd
+                            ).toFixed(0)}{" "}
+                            COP
+                          </div>
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <h3 className="font-semibold">
+                          Total para {numCamaras} cámaras
+                        </h3>
+                        <p>
+                          Diario total:{" "}
+                          <strong>U$ {dailyTotalUsd.toFixed(2)}</strong>
+                          <div className="text-[0.7rem] text-neutral-500">
+                            ≈ ${" "}
+                            {usdToCop(
+                              dailyTotalUsd,
+                              exchangeRateCopPerUsd
+                            ).toFixed(0)}{" "}
+                            COP
+                          </div>
+                        </p>
+                        <p>
+                          Semanal total:{" "}
+                          <strong>U$ {weeklyTotalUsd.toFixed(2)}</strong>
+                          <div className="text-[0.7rem] text-neutral-500">
+                            ≈ ${" "}
+                            {usdToCop(
+                              weeklyTotalUsd,
+                              exchangeRateCopPerUsd
+                            ).toFixed(0)}{" "}
+                            COP
+                          </div>
+                        </p>
+                        <p>
+                          Mensual total:{" "}
+                          <strong>U$ {monthlyTotalUsd.toFixed(2)}</strong>
+                          <div className="text-[0.7rem] text-neutral-500">
+                            ≈ ${" "}
+                            {usdToCop(
+                              monthlyTotalUsd,
+                              exchangeRateCopPerUsd
+                            ).toFixed(0)}{" "}
+                            COP
+                          </div>
+                        </p>
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <h3 className="font-semibold">
-                        Total para {numCamaras} cámaras
-                      </h3>
-                      <p>
-                        Diario total:{" "}
-                        <strong>U$ {dailyTotalUsd.toFixed(2)}</strong>
-                        <div className="text-[0.7rem] text-neutral-500">
-                          ≈ ${" "}
-                          {usdToCop(
-                            dailyTotalUsd,
-                            exchangeRateCopPerUsd
-                          ).toFixed(0)}{" "}
-                          COP
-                        </div>
-                      </p>
-                      <p>
-                        Semanal total:{" "}
-                        <strong>U$ {weeklyTotalUsd.toFixed(2)}</strong>
-                        <div className="text-[0.7rem] text-neutral-500">
-                          ≈ ${" "}
-                          {usdToCop(
-                            weeklyTotalUsd,
-                            exchangeRateCopPerUsd
-                          ).toFixed(0)}{" "}
-                          COP
-                        </div>
-                      </p>
-                      <p>
-                        Mensual total:{" "}
-                        <strong>U$ {monthlyTotalUsd.toFixed(2)}</strong>
-                        <div className="text-[0.7rem] text-neutral-500">
-                          ≈ ${" "}
-                          {usdToCop(
-                            monthlyTotalUsd,
-                            exchangeRateCopPerUsd
-                          ).toFixed(0)}{" "}
-                          COP
-                        </div>
-                      </p>
-                    </div>
-                  </div>
-                )}
+                  )}
               </div>
             </section>
           )}
@@ -1183,11 +1192,10 @@ function TabButton({ label, active, onClick }: TabButtonProps) {
     <button
       type="button"
       onClick={onClick}
-      className={`px-3 py-1 text-sm rounded-t-lg border-b-2 ${
-        active
+      className={`px-3 py-1 text-sm rounded-t-lg border-b-2 ${active
           ? "border-black text-black font-semibold"
           : "border-transparent text-neutral-500 hover:text-neutral-800"
-      }`}
+        }`}
     >
       {label}
     </button>

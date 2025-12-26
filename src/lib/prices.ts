@@ -12,13 +12,14 @@ export type PriceRow = {
   fps?: string;
   precio_usd: number;
   notas?: string;
+  etiqueta?: string;
 };
 
 export function getPricesFromExcel(): PriceRow[] {
   const filePath = path.join(
     process.cwd(),
     "data",
-    "precios_software_seguridad_nube.xlsx"
+    "precios.xlsx"
   );
 
   const fileBuffer = fs.readFileSync(filePath);
@@ -41,7 +42,8 @@ export function getPricesFromExcel(): PriceRow[] {
       : undefined,
     fps: row.fps ? String(row.fps) : undefined,
     precio_usd: Number(row.precio_usd ?? 0),
-    notas: row.notas ? String(row.notas) : undefined
+    notas: row.notas ? String(row.notas) : undefined,
+    etiqueta: row.etiqueta ? String(row.etiqueta) : undefined,
   }));
 
   return prices;
