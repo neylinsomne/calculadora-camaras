@@ -1,4 +1,4 @@
-// src/app/page_add.tsx
+// src/app/page.tsx
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
@@ -349,8 +349,8 @@ export default function HomePage() {
                     <button
                         onClick={() => setActiveTab("propios")}
                         className={`pb-3 text-sm font-medium border-b-2 transition-colors ${activeTab === "propios"
-                                ? "border-blue-600 text-blue-600"
-                                : "border-transparent text-slate-500"
+                            ? "border-blue-600 text-blue-600"
+                            : "border-transparent text-slate-500"
                             }`}
                     >
                         Nuestros Precios (Propios)
@@ -358,8 +358,8 @@ export default function HomePage() {
                     <button
                         onClick={() => setActiveTab("terceros")}
                         className={`pb-3 text-sm font-medium border-b-2 transition-colors ${activeTab === "terceros"
-                                ? "border-blue-600 text-blue-600"
-                                : "border-transparent text-slate-500"
+                            ? "border-blue-600 text-blue-600"
+                            : "border-transparent text-slate-500"
                             }`}
                     >
                         Factura Terceros
@@ -367,8 +367,8 @@ export default function HomePage() {
                     <button
                         onClick={() => setActiveTab("info")}
                         className={`pb-3 text-sm font-medium border-b-2 transition-colors ${activeTab === "info"
-                                ? "border-blue-600 text-blue-600"
-                                : "border-transparent text-slate-500"
+                            ? "border-blue-600 text-blue-600"
+                            : "border-transparent text-slate-500"
                             }`}
                     >
                         Detalle Técnico
@@ -447,8 +447,8 @@ export default function HomePage() {
                                                                     key={sol.id}
                                                                     onClick={() => toggleSolutionPropios(idx, sol.id)}
                                                                     className={`text-left text-xs px-2 py-1.5 rounded border transition-all ${isActive
-                                                                            ? "bg-blue-50 border-blue-400 text-blue-700 shadow-sm"
-                                                                            : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
+                                                                        ? "bg-blue-50 border-blue-400 text-blue-700 shadow-sm"
+                                                                        : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
                                                                         }`}
                                                                 >
                                                                     <div className="font-medium truncate" title={sol.name}>
@@ -848,6 +848,262 @@ export default function HomePage() {
                     </div>
                 )}
             </div>
+
+            {/* Print-only views for PDF */}
+            <PrintQuotePropios
+                cartItems={cartCalcPropios.rows}
+                solutionsData={solutionsData}
+                globalMarginPercent={globalMarginPercent}
+                exchangeRate={exchangeRate}
+                className="print-only"
+            />
+            <PrintQuoteTerceros
+                cartItems={cartItemsTerceros}
+                analyticServices={analyticServices}
+                recordingOptions={recordingOptions}
+                globalMarginPercent={globalMarginPercent}
+                exchangeRate={exchangeRate}
+                className="print-only"
+            />
         </main>
     );
 }
+
+// --- PRINT COMPONENTS ---
+
+type PrintQuotePropiosProps = {
+    cartItems: Array<{
+        id: string;
+        nombre: string;
+        cantidad: number;
+        selectedSolutionIds: string[];
+        rowTotalBaseUsd: number;
+    }>;
+    solutionsData: SolutionDef[];
+    globalMarginPercent: number;
+    exchangeRate: number;
+    className?: string;
+};
+
+function PrintQuotePropios({
+    cartItems,
+    solutionsData,
+    globalMarginPercent,
+    exchangeRate,
+    className = "",
+}: PrintQuotePropiosProps) {
+    if (cartItems.length === 0) return null;
+
+    const factor = 1 + (globalMarginPercent || 0) / 100;
+
+    const rows = cartItems.map((item, index) => {
+        const selectedSolutions = solutionsData.filter((s) =>
+            item.selectedSolutionIds.includes(s.id)
+        );
+        const monthlyTotalSaleUsd = item.rowTotalBaseUsd * factor;
+        return {
+            index: index + 1,
+            item,
+            selectedSolutions,
+            monthlyTotalBaseUsd: item.rowTotalBaseUsd,
+            monthlyTotalSaleUsd,
+        };
+    });
+
+    const monthlySaleTotalUsd = rows.reduce((acc, r) => acc + r.monthlyTotalSaleUsd, 0);
+    const monthlySaleTotalCop = usdToCop(monthlySaleTotalUsd, exchangeRate);
+
+    return (
+        <div className={className}>
+            <div className="p-8 text-sm text-neutral-900">
+                <header className="flex justify-between items-start mb-6">
+                    <div>
+                        <h1 className="text-xl font-bold mb-1">
+                            Propuesta económica – Soluciones IA Propias
+                        </h1>
+                        <p className="text-xs text-neutral-600">
+                            Detalle de soluciones de analítica por cámara/grupo.
+                        </p>
+                    </div>
+                    <div className="text-xs text-right">
+                        <p>Fecha: {new Date().toLocaleDateString("es-CO")}</p>
+                        <p>Tasa de referencia: {exchangeRate.toFixed(0)} COP/USD</p>
+                    </div>
+                </header>
+
+                <table className="w-full border-collapse text-xs mb-4">
+                    <thead>
+                        <tr>
+                            <th className="border p-1 text-left w-8">#</th>
+                            <th className="border p-1 text-left">ID</th>
+                            <th className="border p-1 text-left">Descripción</th>
+                            <th className="border p-1 text-right">Cant.</th>
+                            <th className="border p-1 text-left">Soluciones</th>
+                            <th className="border p-1 text-right">Valor mensual (COP$)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows.map((row) => {
+                            const monthlySaleCop = usdToCop(row.monthlyTotalSaleUsd, exchangeRate);
+                            return (
+                                <tr key={row.index}>
+                                    <td className="border p-1 align-top">{row.index}</td>
+                                    <td className="border p-1 align-top">{row.item.id}</td>
+                                    <td className="border p-1 align-top">{row.item.nombre || "—"}</td>
+                                    <td className="border p-1 align-top text-right">{row.item.cantidad}</td>
+                                    <td className="border p-1 align-top">
+                                        {row.selectedSolutions.length === 0
+                                            ? "Sin soluciones"
+                                            : row.selectedSolutions.map((s) => s.name).join(", ")}
+                                    </td>
+                                    <td className="border p-1 align-top text-right">
+                                        ${monthlySaleCop.toFixed(0)} COP
+                                    </td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+
+                <div className="flex justify-end mt-2">
+                    <table className="text-xs">
+                        <tbody>
+                            <tr>
+                                <td className="pr-4 pb-1 text-right font-semibold">Total mensual:</td>
+                                <td className="pb-1 text-right">${monthlySaleTotalCop.toFixed(0)} COP</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <p className="mt-6 text-xs text-neutral-600">
+                    Los valores están expresados en pesos colombianos (COP) y corresponden
+                    al valor mensual estimado de la solución propuesta.
+                </p>
+            </div>
+        </div>
+    );
+}
+
+type PrintQuoteTercerosProps = {
+    cartItems: CameraCartItem[];
+    analyticServices: PriceRow[];
+    recordingOptions: PriceRow[];
+    globalMarginPercent: number;
+    exchangeRate: number;
+    className?: string;
+};
+
+function PrintQuoteTerceros({
+    cartItems,
+    analyticServices,
+    recordingOptions,
+    globalMarginPercent,
+    exchangeRate,
+    className = "",
+}: PrintQuoteTercerosProps) {
+    if (cartItems.length === 0) return null;
+
+    const factor = 1 + (globalMarginPercent || 0) / 100;
+
+    const rows = cartItems.map((item, index) => {
+        const analyticSelected = analyticServices.filter((s) =>
+            item.selectedServiceIds.includes(s.id)
+        );
+        const recordingInfo = getRecordingInfo(item.selectedRecording, recordingOptions);
+
+        const monthlyPerCameraBaseUsd =
+            analyticSelected.reduce((acc, s) => acc + s.precio_usd, 0) +
+            (recordingInfo?.precio_usd ?? 0);
+
+        const monthlyTotalBaseUsd = monthlyPerCameraBaseUsd * item.cantidad;
+        const monthlyTotalSaleUsd = monthlyTotalBaseUsd * factor;
+
+        return {
+            index: index + 1,
+            item,
+            analyticSelected,
+            recordingInfo,
+            monthlyTotalSaleUsd,
+        };
+    });
+
+    const monthlySaleTotalUsd = rows.reduce((acc, r) => acc + r.monthlyTotalSaleUsd, 0);
+    const monthlySaleTotalCop = usdToCop(monthlySaleTotalUsd, exchangeRate);
+
+    return (
+        <div className={className}>
+            <div className="p-8 text-sm text-neutral-900">
+                <header className="flex justify-between items-start mb-6">
+                    <div>
+                        <h1 className="text-xl font-bold mb-1">
+                            Propuesta económica – Servicios Terceros
+                        </h1>
+                        <p className="text-xs text-neutral-600">
+                            Detalle de servicios de analítica y grabación por cámara/grupo.
+                        </p>
+                    </div>
+                    <div className="text-xs text-right">
+                        <p>Fecha: {new Date().toLocaleDateString("es-CO")}</p>
+                        <p>Tasa de referencia: {exchangeRate.toFixed(0)} COP/USD</p>
+                    </div>
+                </header>
+
+                <table className="w-full border-collapse text-xs mb-4">
+                    <thead>
+                        <tr>
+                            <th className="border p-1 text-left w-8">#</th>
+                            <th className="border p-1 text-left">ID</th>
+                            <th className="border p-1 text-left">Descripción</th>
+                            <th className="border p-1 text-right">Cant.</th>
+                            <th className="border p-1 text-left">Grabación</th>
+                            <th className="border p-1 text-left">Servicios de analítica</th>
+                            <th className="border p-1 text-right">Valor mensual (COP$)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows.map((row) => {
+                            const monthlySaleCop = usdToCop(row.monthlyTotalSaleUsd, exchangeRate);
+                            return (
+                                <tr key={row.index}>
+                                    <td className="border p-1 align-top">{row.index}</td>
+                                    <td className="border p-1 align-top">{row.item.id}</td>
+                                    <td className="border p-1 align-top">{row.item.nombre || "—"}</td>
+                                    <td className="border p-1 align-top text-right">{row.item.cantidad}</td>
+                                    <td className="border p-1 align-top">
+                                        {row.recordingInfo?.modalidad || "No definido"}
+                                    </td>
+                                    <td className="border p-1 align-top">
+                                        {row.analyticSelected.length === 0
+                                            ? "Sin analítica"
+                                            : row.analyticSelected.map((s) => s.categoria).join(", ")}
+                                    </td>
+                                    <td className="border p-1 align-top text-right">
+                                        ${monthlySaleCop.toFixed(0)} COP
+                                    </td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+
+                <div className="flex justify-end mt-2">
+                    <table className="text-xs">
+                        <tbody>
+                            <tr>
+                                <td className="pr-4 pb-1 text-right font-semibold">Total mensual:</td>
+                                <td className="pb-1 text-right">${monthlySaleTotalCop.toFixed(0)} COP</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <p className="mt-6 text-xs text-neutral-600">
+                    Los valores están expresados en pesos colombianos (COP) y corresponden
+                    al valor mensual estimado de la solución propuesta.
+                </p>
+            </div>
+        </div>
+    );
+}
+
