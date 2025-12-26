@@ -864,22 +864,26 @@ export default function HomePage() {
                 )}
             </div>
 
-            {/* Print-only views for PDF */}
-            <PrintQuotePropios
-                cartItems={cartCalcPropios.rows}
-                solutionsData={solutionsData}
-                globalMarginPercent={globalMarginPercent}
-                exchangeRate={exchangeRate}
-                className="print-only"
-            />
-            <PrintQuoteTerceros
-                cartItems={cartItemsTerceros}
-                analyticServices={analyticServices}
-                recordingOptions={recordingOptions}
-                globalMarginPercent={globalMarginPercent}
-                exchangeRate={exchangeRate}
-                className="print-only"
-            />
+            {/* Print-only views for PDF - Solo renderiza según la pestaña activa */}
+            {activeTab === "propios" && (
+                <PrintQuotePropios
+                    cartItems={cartCalcPropios.rows}
+                    solutionsData={solutionsData}
+                    globalMarginPercent={globalMarginPercent}
+                    exchangeRate={exchangeRate}
+                    className="print-only"
+                />
+            )}
+            {activeTab === "terceros" && (
+                <PrintQuoteTerceros
+                    cartItems={cartItemsTerceros}
+                    analyticServices={analyticServices}
+                    recordingOptions={recordingOptions}
+                    globalMarginPercent={globalMarginPercent}
+                    exchangeRate={exchangeRate}
+                    className="print-only"
+                />
+            )}
         </main>
     );
 }
